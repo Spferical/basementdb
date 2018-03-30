@@ -1,0 +1,6 @@
+[package]
+name = "basementdb"
+version = "0.1.0"
+authors = ["Matthew Pfeiffer <spferical@gmail.com>"]
+
+[dependencies]
