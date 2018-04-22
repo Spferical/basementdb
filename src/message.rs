@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use signed::Signed;
 use std::vec::Vec;
 
 type HashDigest = [u64; 4];
@@ -27,6 +29,7 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct RequestMessage {
     o: Vec<u8>, // Operation to be performed
     t: usize,   // Timestamp assigned by the client to each request
@@ -34,6 +37,7 @@ struct RequestMessage {
     s: bool,    // Flag indicating if this is a strong operation
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct OrderedRequestMessage {
     v: usize,          // Current view number
     n: usize,          // Highest sequence number executed
@@ -44,6 +48,7 @@ struct OrderedRequestMessage {
     ND: Vec<u8>,       // ND is a set of non-deterministic application variables
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct ClientResponseMessage {
     response: SignedClientResponseMessage, // The first chunk of the response
     j: u64,                                // TODO; public key ID (replica)
@@ -51,11 +56,13 @@ struct ClientResponseMessage {
     OR: OrderedRequestMessage,             // OrderedRequestMessage
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 enum SignedClientResponseMessage {
-    SpecReply(SpecReplyMessage),
-    Reply(ReplyMessage),
+    SpecReply(Signed<SpecReplyMessage>),
+    Reply(Signed<ReplyMessage>),
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct SpecReplyMessage {
     v: usize,        // Current view number
     n: usize,        // Highest sequence number executed
@@ -65,11 +72,13 @@ struct SpecReplyMessage {
     t: usize,        // Timestamp assigned by the client to each request
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct CommitMessage {
     OR: OrderedRequestMessage, // OrderedRequestMessage
     j: u64,                    // TODO; public key ID (replica)
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct ReplyMessage {
     v: usize,        // Current view number
     n: usize,        // Highest sequence number executed
@@ -79,6 +88,7 @@ struct ReplyMessage {
     t: usize,        // Timestamp assigned by the client to each request
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct FillHoleMessage {
     v: usize,    // Current view number
     n: usize,    // Highest sequence number executed
@@ -86,17 +96,26 @@ struct FillHoleMessage {
     i: u64,      // TODO; public key ID (primary)
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct IHateThePrimaryMessage {}
+#[derive(Serialize, Deserialize, Debug)]
 struct ViewChangeMessage {}
+#[derive(Serialize, Deserialize, Debug)]
 struct NewViewMessage {}
+#[derive(Serialize, Deserialize, Debug)]
 struct ViewConfirmMessage {}
 
+#[derive(Serialize, Deserialize, Debug)]
 struct POMMessage {}
+#[derive(Serialize, Deserialize, Debug)]
 struct PODMessage {}
+#[derive(Serialize, Deserialize, Debug)]
 struct POAMessage {}
 
+#[derive(Serialize, Deserialize, Debug)]
 struct CheckPointMessage {}
 
+#[derive(Serialize, Deserialize, Debug)]
 enum Message {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
