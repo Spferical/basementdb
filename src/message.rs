@@ -32,7 +32,6 @@ struct RequestMessage {}
 struct OrderedRequestMessage {}
 struct SpecReplyMessage {}
 struct CommitMessage {}
-struct CommitMessage {}
 struct ReplyMessage {}
 struct FillHoleMessage {}
 
@@ -49,4 +48,20 @@ struct CheckPointMessage {}
 
 enum Message {
     Request(RequestMessage),
+    OrderedRequest(OrderedRequestMessage),
+    SpecReply(SpecReplyMessage),
+    Commit(CommitMessage),
+    Reply(ReplyMessage),
+    FillHole(FillHoleMessage),
+
+    IHateThePrimary(IHateThePrimaryMessage),
+    ViewChange(ViewChangeMessage),
+    NewView(NewViewMessage),
+    ViewConfirm(ViewConfirmMessage),
+
+    POM(POMMessage),
+    POD(PODMessage),
+    POA(POAMessage),
+
+    CheckPoint(CheckPointMessage),
 }
