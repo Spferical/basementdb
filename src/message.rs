@@ -28,7 +28,12 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
-struct RequestMessage {}
+struct RequestMessage {
+    o: Vec<u8>, // Operation to be performed
+    t: usize,   // Timestamp assigned by the client to each request
+    c: u64,     // TODO; public key ID or whatever
+    s: bool,    // Flag indicating if this is a strong operation
+}
 struct OrderedRequestMessage {}
 struct SpecReplyMessage {}
 struct CommitMessage {}
