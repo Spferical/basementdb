@@ -2,7 +2,7 @@ extern crate sodiumoxide;
 
 use self::sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
 use self::sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tarpc::bincode::Infinite;
 use tarpc::bincode::serialize;
 
@@ -10,6 +10,7 @@ use tarpc::bincode::serialize;
 ///
 /// Construct one of these by creating a public-private keypair
 /// and then using `Signed::new()`
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Signed<T: Serialize> {
     base: T,
     signature: Signature,
