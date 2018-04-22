@@ -31,7 +31,7 @@ enum MessageType {
 struct RequestMessage {
     o: Vec<u8>, // Operation to be performed
     t: usize,   // Timestamp assigned by the client to each request
-    c: u64,     // TODO; public key ID or whatever
+    c: u64,     // TODO; public key ID (client)
     s: bool,    // Flag indicating if this is a strong operation
 }
 
@@ -40,14 +40,14 @@ struct OrderedRequestMessage {
     n: usize,          // Highest sequence number executed
     h: HashChain,      // History, a hash-chain digest of the requests
     d_req: HashDigest, // Digest of the current request
-    i: u64,            // TODO; public key ID or whatever
+    i: u64,            // TODO; public key ID (primary)
     s: bool,           // Flag indicating if this is a strong operation
     ND: Vec<u8>,       // ND is a set of non-deterministic application variables
 }
 
 struct ClientResponseMessage {
     response: SignedClientResponseMessage, // The first chunk of the response
-    j: u64,                                // TODO; public key ID or whatever
+    j: u64,                                // TODO; public key ID (replica)
     r: Vec<u8>,                            // Result of the operation performed
     OR: OrderedRequestMessage,             // OrderedRequestMessage
 }
@@ -62,12 +62,30 @@ struct SpecReplyMessage {
     n: usize,        // Highest sequence number executed
     h: HashChain,    // History, a hash-chain digest of the requests
     d_r: HashDigest, // Digest of the result `r`
+    c: u64,          // TODO; public key ID (client)
+    t: usize,        // Timestamp assigned by the client to each request
+}
+
+struct CommitMessage {
+    OR: OrderedRequestMessage, // OrderedRequestMessage
+    j: u64,                    // TODO; public key ID (replica)
+}
+
+struct ReplyMessage {
+    v: usize,        // Current view number
+    n: usize,        // Highest sequence number executed
+    h: HashChain,    // History, a hash-chain digest of the requests
+    d_r: HashDigest, // Digest of the result `r`
     c: u64,          // TODO; public key ID or whatever
     t: usize,        // Timestamp assigned by the client to each request
 }
-struct CommitMessage {}
-struct ReplyMessage {}
-struct FillHoleMessage {}
+
+struct FillHoleMessage {
+    v: usize,    // Current view number
+    n: usize,    // Highest sequence number executed
+    OR_n: usize, // OrderedRequestMessage.n
+    i: u64,      // TODO; public key ID (primary)
+}
 
 struct IHateThePrimaryMessage {}
 struct ViewChangeMessage {}
