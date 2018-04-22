@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::vec::Vec;
 
-type DigestHash = [u64; 4];
+type HashDigest = [u64; 4];
 type HashChain = Vec<DigestHash>;
 
 enum MessageType {
@@ -34,7 +34,17 @@ struct RequestMessage {
     c: u64,     // TODO; public key ID or whatever
     s: bool,    // Flag indicating if this is a strong operation
 }
-struct OrderedRequestMessage {}
+
+struct OrderedRequestMessage {
+    v: usize,          // Current view number
+    n: usize,          // Highest sequence number executed
+    h: HashChain,      // History, a hash-chain digest of the requests
+    d_req: HashDigest, // Digest of the current request
+    i: u64,            // TODO; public key ID or whatever
+    s: bool,           // Flag indicating if this is a strong operation
+    ND: Vec<u8>,       // ND is a set of non-deterministic application variables
+}
+
 struct SpecReplyMessage {}
 struct CommitMessage {}
 struct ReplyMessage {}
