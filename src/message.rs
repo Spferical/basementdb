@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::vec::Vec;
 
 type HashDigest = [u64; 4];
-type HashChain = Vec<DigestHash>;
+type HashChain = Vec<HashDigest>;
 
 enum MessageType {
     // 4.4 Sequence Number Assignment
