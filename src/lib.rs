@@ -6,4 +6,5 @@ extern crate serde;
 extern crate tarpc;
 
 pub mod message;
+pub mod signed;
 pub mod zeno;

@@ -1,7 +1,3 @@
-extern crate sodiumoxide;
-
-use self::sodiumoxide::crypto::sign::sign_detached;
-use self::sodiumoxide::crypto::sign::verify_detached;
 use std::vec::Vec;
 
 type HashDigest = [u64; 4];
