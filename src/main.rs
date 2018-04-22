@@ -3,12 +3,14 @@
 
 #[macro_use]
 extern crate tarpc;
+extern crate config;
 
 use tarpc::sync::{client, server};
 use tarpc::sync::client::ClientExt;
 use tarpc::util::Never;
 use std::sync::mpsc;
 use std::thread;
+use std::env;
 
 service! {
     rpc hello(name: String) -> String;
@@ -24,6 +26,19 @@ impl SyncService for HelloServer {
 }
 
 fn main() {
+    let args : Vec<_> = env::args().collect();
+    if args.len() != 2 {
+        println!("USAGE: {} URL", args.get(0).unwrap());
+    }
+
+    let mut settings = config::Config::default();
+    settings.merge(config::File::with_name("config")).unwrap();
+    settings.merge(config::Environment::with_prefix("BDB")).unwrap();
+    let debug = settings.get_bool("debug").unwrap();
+    println!("debug: {:?}", debug);
+    let servers = settings.get::<Vec<String>>("servers").unwrap();
+    println!("servers: {:?}", servers);
+
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let handle = HelloServer.listen("localhost:10000",
