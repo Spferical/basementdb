@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::vec::Vec;
 
 type DigestHash = [u64; 4];
@@ -27,8 +28,25 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
-struct Message {
-    v: usize, // Current view number
-    n: usize, // Highest sequence number executed
-    h: usize,
+struct RequestMessage {}
+struct OrderedRequestMessage {}
+struct SpecReplyMessage {}
+struct CommitMessage {}
+struct CommitMessage {}
+struct ReplyMessage {}
+struct FillHoleMessage {}
+
+struct IHateThePrimaryMessage {}
+struct ViewChangeMessage {}
+struct NewViewMessage {}
+struct ViewConfirmMessage {}
+
+struct POMMessage {}
+struct PODMessage {}
+struct POAMessage {}
+
+struct CheckPointMessage {}
+
+enum Message {
+    Request(RequestMessage),
 }
