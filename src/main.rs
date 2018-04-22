@@ -28,8 +28,10 @@ impl SyncService for HelloServer {
 fn main() {
     let args : Vec<_> = env::args().collect();
     if args.len() != 2 {
-        println!("USAGE: {} URL", args.get(0).unwrap());
+        println!("USAGE: {} URL", args[0]);
+        return;
     }
+    let our_url = args[1].clone();
 
     let mut settings = config::Config::default();
     settings.merge(config::File::with_name("config")).unwrap();
@@ -41,7 +43,7 @@ fn main() {
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let handle = HelloServer.listen("localhost:10000",
+        let handle = HelloServer.listen(our_url,
             server::Options::default()).unwrap();
         tx.send(handle.addr()).unwrap();
         handle.run();
