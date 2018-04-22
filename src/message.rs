@@ -45,7 +45,26 @@ struct OrderedRequestMessage {
     ND: Vec<u8>,       // ND is a set of non-deterministic application variables
 }
 
-struct SpecReplyMessage {}
+struct ClientResponseMessage {
+    response: SignedClientResponseMessage, // The first chunk of the response
+    j: u64,                                // TODO; public key ID or whatever
+    r: Vec<u8>,                            // Result of the operation performed
+    OR: OrderedRequestMessage,             // OrderedRequestMessage
+}
+
+enum SignedClientResponseMessage {
+    SpecReply(SpecReplyMessage),
+    Reply(ReplyMessage),
+}
+
+struct SpecReplyMessage {
+    v: usize,        // Current view number
+    n: usize,        // Highest sequence number executed
+    h: HashChain,    // History, a hash-chain digest of the requests
+    d_r: HashDigest, // Digest of the result `r`
+    c: u64,          // TODO; public key ID or whatever
+    t: usize,        // Timestamp assigned by the client to each request
+}
 struct CommitMessage {}
 struct ReplyMessage {}
 struct FillHoleMessage {}
@@ -64,9 +83,8 @@ struct CheckPointMessage {}
 enum Message {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
-    SpecReply(SpecReplyMessage),
+    ClientResponse(ClientResponseMessage),
     Commit(CommitMessage),
-    Reply(ReplyMessage),
     FillHole(FillHoleMessage),
 
     IHateThePrimary(IHateThePrimaryMessage),
