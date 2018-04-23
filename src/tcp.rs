@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use message::Message;
 
+const BUFFER_SIZE: usize = 8 * 1024;
 const MAX_BUF_SIZE: usize = 1048576;
 const READ_TIMEOUT: u64 = 30;
 const WRITE_TIMEOUT: u64 = 30;
@@ -18,7 +19,7 @@ pub struct TCPServer {
 }
 
 pub fn read_string_from_socket(mut sock: &TcpStream) -> Option<String> {
-    let mut buf: [u8; 256] = [0; 256];
+    let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
     let mut curr_buf: Vec<u8> = Vec::new();
 
     'outer: loop {
@@ -33,7 +34,7 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Option<String> {
                     }
                 }
 
-                if num_bytes != 256 {
+                if num_bytes != BUFFER_SIZE {
                     break 'outer;
                 }
             }
