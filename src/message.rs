@@ -50,14 +50,14 @@ struct OrderedRequestMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ClientResponseMessage {
-    response: SignedClientResponseMessage, // The first chunk of the response
-    j: u64,                                // TODO; public key ID (replica)
-    r: Vec<u8>,                            // Result of the operation performed
-    OR: OrderedRequestMessage,             // OrderedRequestMessage
+    response: ConcreteClientResponseMessage, // The first chunk of the response
+    j: u64,                                  // TODO; public key ID (replica)
+    r: Vec<u8>,                              // Result of the operation performed
+    OR: OrderedRequestMessage,               // OrderedRequestMessage
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-enum SignedClientResponseMessage {
+enum ConcreteClientResponseMessage {
     SpecReply(Signed<SpecReplyMessage>),
     Reply(Signed<ReplyMessage>),
 }
