@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use signed::Signed;
+use signed;
 use std::vec::Vec;
 
 type HashDigest = [u64; 4];
@@ -31,10 +31,10 @@ enum MessageType {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct RequestMessage {
-    o: Vec<u8>, // Operation to be performed
-    t: usize,   // Timestamp assigned by the client to each request
-    c: u64,     // TODO; public key ID (client)
-    s: bool,    // Flag indicating if this is a strong operation
+    o: Vec<u8>,        // Operation to be performed
+    t: usize,          // Timestamp assigned by the client to each request
+    c: signed::Public, // Client public key
+    s: bool,           // Flag indicating if this is a strong operation
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -43,7 +43,7 @@ struct OrderedRequestMessage {
     n: usize,          // Highest sequence number executed
     h: HashChain,      // History, a hash-chain digest of the requests
     d_req: HashDigest, // Digest of the current request
-    i: u64,            // TODO; public key ID (primary)
+    i: signed::Public, // Primary public key
     s: bool,           // Flag indicating if this is a strong operation
     ND: Vec<u8>,       // ND is a set of non-deterministic application variables
 }
@@ -51,49 +51,49 @@ struct OrderedRequestMessage {
 #[derive(Serialize, Deserialize, Debug)]
 struct ClientResponseMessage {
     response: ConcreteClientResponseMessage, // The first chunk of the response
-    j: u64,                                  // TODO; public key ID (replica)
+    j: signed::Public,                       // Replica public key
     r: Vec<u8>,                              // Result of the operation performed
     OR: OrderedRequestMessage,               // OrderedRequestMessage
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 enum ConcreteClientResponseMessage {
-    SpecReply(Signed<SpecReplyMessage>),
-    Reply(Signed<ReplyMessage>),
+    SpecReply(signed::Signed<SpecReplyMessage>),
+    Reply(signed::Signed<ReplyMessage>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SpecReplyMessage {
-    v: usize,        // Current view number
-    n: usize,        // Highest sequence number executed
-    h: HashChain,    // History, a hash-chain digest of the requests
-    d_r: HashDigest, // Digest of the result `r`
-    c: u64,          // TODO; public key ID (client)
-    t: usize,        // Timestamp assigned by the client to each request
+    v: usize,          // Current view number
+    n: usize,          // Highest sequence number executed
+    h: HashChain,      // History, a hash-chain digest of the requests
+    d_r: HashDigest,   // Digest of the result `r`
+    c: signed::Public, // Client public key
+    t: usize,          // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct CommitMessage {
     OR: OrderedRequestMessage, // OrderedRequestMessage
-    j: u64,                    // TODO; public key ID (replica)
+    j: signed::Public,         // Replica public key
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ReplyMessage {
-    v: usize,        // Current view number
-    n: usize,        // Highest sequence number executed
-    h: HashChain,    // History, a hash-chain digest of the requests
-    d_r: HashDigest, // Digest of the result `r`
-    c: u64,          // TODO; public key ID or whatever
-    t: usize,        // Timestamp assigned by the client to each request
+    v: usize,          // Current view number
+    n: usize,          // Highest sequence number executed
+    h: HashChain,      // History, a hash-chain digest of the requests
+    d_r: HashDigest,   // Digest of the result `r`
+    c: signed::Public, // Client public key
+    t: usize,          // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FillHoleMessage {
-    v: usize,    // Current view number
-    n: usize,    // Highest sequence number executed
-    OR_n: usize, // OrderedRequestMessage.n
-    i: u64,      // TODO; public key ID (primary)
+    v: usize,          // Current view number
+    n: usize,          // Highest sequence number executed
+    OR_n: usize,       // OrderedRequestMessage.n
+    i: signed::Public, // Primary public key
 }
 
 #[derive(Serialize, Deserialize, Debug)]
