@@ -8,6 +8,7 @@ extern crate serde_derive;
 
 #[macro_use]
 extern crate tarpc;
+extern crate tokio_core;
 
 pub mod message;
 pub mod signed;
