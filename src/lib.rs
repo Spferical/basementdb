@@ -10,6 +10,9 @@ extern crate serde_derive;
 extern crate tarpc;
 extern crate tokio_core;
 
+extern crate sodiumoxide;
+
+pub mod digest;
 pub mod message;
 pub mod signed;
 pub mod zeno;

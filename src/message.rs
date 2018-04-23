@@ -1,9 +1,7 @@
+use digest::{HashChain, HashDigest};
 use serde::{Deserialize, Serialize};
 use signed;
 use std::vec::Vec;
-
-type HashDigest = [u64; 4];
-type HashChain = Vec<HashDigest>;
 
 enum MessageType {
     // 4.4 Sequence Number Assignment

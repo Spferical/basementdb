@@ -1,8 +1,6 @@
-extern crate sodiumoxide;
-
-use self::sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
-use self::sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
 use serde::{Deserialize, Serialize};
+use sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
+use sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
 use tarpc::bincode::Infinite;
 use tarpc::bincode::serialize;
 
