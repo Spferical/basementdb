@@ -25,9 +25,6 @@ fn main() {
     let servers = settings.get::<Vec<String>>("servers").unwrap();
     println!("servers: {:?}", servers);
 
-    let z = zeno::ZenoService::new(our_url);
-    let addr = z.start();
-
-    let client = zeno::SyncClient::connect(addr, client::Options::default()).unwrap();
-    println!("{}", client.echo("hi".to_string()).unwrap());
+    let z = zeno::ZenoService::new(our_url, servers);
+    z.run();
 }

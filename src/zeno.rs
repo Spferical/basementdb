@@ -1,12 +1,24 @@
+extern crate futures;
+extern crate tarpc;
+
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
-use tarpc::sync::{client, server};
-use tarpc::util::Never;
+use zeno::futures::Future;
 
-struct Zeno;
+use tarpc::future::client::ClientExt;
+use tarpc::future::{client, server};
+use tarpc::util::FirstSocketAddr;
+use tarpc::util::Never;
+use tokio_core::reactor;
+
+struct Zeno {
+    servers: HashMap<String, Option<SyncClient>>,
+}
 
 service! {
     rpc echo(text: String) -> String;
@@ -18,30 +30,48 @@ pub struct ZenoService {
     zeno: Arc<Mutex<Zeno>>,
 }
 
-impl SyncService for ZenoService {
-    fn echo(&self, text: String) -> Result<String, Never> {
+impl FutureService for ZenoService {
+    type EchoFut = Result<String, Never>;
+
+    fn echo(&self, text: String) -> Self::EchoFut {
         Ok(text)
     }
 }
 
 impl ZenoService {
-    pub fn new(url: String) -> ZenoService {
+    pub fn new(url: String, server_urls: Vec<String>) -> ZenoService {
+        let servers: HashMap<_, _> = server_urls
+            .iter()
+            .filter(|u| **u != url)
+            .map(|u| (u.clone(), None))
+            .collect();
         ZenoService {
             url: url,
-            zeno: Arc::new(Mutex::new(Zeno {})),
+            zeno: Arc::new(Mutex::new(Zeno { servers: servers })),
         }
     }
 
-    /// starts the server threads and blocks until it is listening
-    pub fn start(&self) -> SocketAddr {
-        let (tx, rx) = mpsc::channel();
+    /// starts the server and blocks until the server stops
+    pub fn run(&self) {
+        let mut reactor = reactor::Core::new().unwrap();
         let clone = self.clone();
-        thread::spawn(move || {
-            let url = clone.url.clone();
-            let handle = clone.listen(url, server::Options::default()).unwrap();
-            tx.send(handle.addr()).unwrap();
-            handle.run()
-        });
-        rx.recv().unwrap()
+        let url = clone.url.clone();
+        let (handle, server) = clone
+            .listen(
+                url.first_socket_addr(),
+                &reactor.handle(),
+                server::Options::default(),
+            )
+            .unwrap();
+        reactor.handle().spawn(server);
+        let options = client::Options::default().handle(reactor.handle());
+        reactor
+            .run(
+                FutureClient::connect(handle.addr(), options)
+                    .map_err(tarpc::Error::from)
+                    .and_then(|client| client.echo("Hello, world!".to_string()))
+                    .map(|resp| println!("{}", resp)),
+            )
+            .unwrap();
     }
 }
