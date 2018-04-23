@@ -1,7 +1,7 @@
 [package]
 name = "basementdb"
 version = "0.1.0"
-authors = ["Matthew Pfeiffer <spferical@gmail.com>"]
+authors = ["Matthew Pfeiffer <spferical@gmail.com>", "Srinivas Kaza <kaa@mit.edu>"]
 
 [dependencies]
 tarpc = "0.9.0"
