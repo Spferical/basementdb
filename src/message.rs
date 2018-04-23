@@ -27,93 +27,93 @@ enum MessageType {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct RequestMessage {
-    o: Vec<u8>,        // Operation to be performed
-    t: usize,          // Timestamp assigned by the client to each request
-    c: signed::Public, // Client public key
-    s: bool,           // Flag indicating if this is a strong operation
+pub struct RequestMessage {
+    pub o: Vec<u8>,        // Operation to be performed
+    pub t: usize,          // Timestamp assigned by the client to each request
+    pub c: signed::Public, // Client public key
+    pub s: bool,           // Flag indicating if this is a strong operation
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct OrderedRequestMessage {
-    v: usize,          // Current view number
-    n: usize,          // Highest sequence number executed
-    h: HashChain,      // History, a hash-chain digest of the requests
-    d_req: HashDigest, // Digest of the current request
-    i: signed::Public, // Primary public key
-    s: bool,           // Flag indicating if this is a strong operation
-    ND: Vec<u8>,       // ND is a set of non-deterministic application variables
+pub struct OrderedRequestMessage {
+    pub v: usize,          // Current view number
+    pub n: usize,          // Highest sequence number executed
+    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub d_req: HashDigest, // Digest of the current request
+    pub i: signed::Public, // Primary public key
+    pub s: bool,           // Flag indicating if this is a strong operation
+    pub ND: Vec<u8>,       // ND is a set of non-deterministic application variables
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ClientResponseMessage {
-    response: ConcreteClientResponseMessage, // The first chunk of the response
-    j: signed::Public,                       // Replica public key
-    r: Vec<u8>,                              // Result of the operation performed
-    OR: OrderedRequestMessage,               // OrderedRequestMessage
+pub struct ClientResponseMessage {
+    pub response: ConcreteClientResponseMessage, // The first chunk of the response
+    pub j: signed::Public,                       // Replica public key
+    pub r: Vec<u8>,                              // Result of the operation performed
+    pub OR: OrderedRequestMessage,               // OrderedRequestMessage
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-enum ConcreteClientResponseMessage {
+pub enum ConcreteClientResponseMessage {
     SpecReply(signed::Signed<SpecReplyMessage>),
     Reply(signed::Signed<ReplyMessage>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SpecReplyMessage {
-    v: usize,          // Current view number
-    n: usize,          // Highest sequence number executed
-    h: HashChain,      // History, a hash-chain digest of the requests
-    d_r: HashDigest,   // Digest of the result `r`
-    c: signed::Public, // Client public key
-    t: usize,          // Timestamp assigned by the client to each request
+pub struct SpecReplyMessage {
+    pub v: usize,          // Current view number
+    pub n: usize,          // Highest sequence number executed
+    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub d_r: HashDigest,   // Digest of the result `r`
+    pub c: signed::Public, // Client public key
+    pub t: usize,          // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct CommitMessage {
-    OR: OrderedRequestMessage, // OrderedRequestMessage
-    j: signed::Public,         // Replica public key
+pub struct CommitMessage {
+    pub OR: OrderedRequestMessage, // OrderedRequestMessage
+    pub j: signed::Public,         // Replica public key
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ReplyMessage {
-    v: usize,          // Current view number
-    n: usize,          // Highest sequence number executed
-    h: HashChain,      // History, a hash-chain digest of the requests
-    d_r: HashDigest,   // Digest of the result `r`
-    c: signed::Public, // Client public key
-    t: usize,          // Timestamp assigned by the client to each request
+pub struct ReplyMessage {
+    pub v: usize,          // Current view number
+    pub n: usize,          // Highest sequence number executed
+    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub d_r: HashDigest,   // Digest of the result `r`
+    pub c: signed::Public, // Client public key
+    pub t: usize,          // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct FillHoleMessage {
-    v: usize,          // Current view number
-    n: usize,          // Highest sequence number executed
-    OR_n: usize,       // OrderedRequestMessage.n
-    i: signed::Public, // Primary public key
+pub struct FillHoleMessage {
+    pub v: usize,          // Current view number
+    pub n: usize,          // Highest sequence number executed
+    pub OR_n: usize,       // OrderedRequestMessage.n
+    pub i: signed::Public, // Primary public key
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct IHateThePrimaryMessage {}
+pub struct IHateThePrimaryMessage {}
 #[derive(Serialize, Deserialize, Debug)]
-struct ViewChangeMessage {}
+pub struct ViewChangeMessage {}
 #[derive(Serialize, Deserialize, Debug)]
-struct NewViewMessage {}
+pub struct NewViewMessage {}
 #[derive(Serialize, Deserialize, Debug)]
-struct ViewConfirmMessage {}
+pub struct ViewConfirmMessage {}
 
 #[derive(Serialize, Deserialize, Debug)]
-struct POMMessage {}
+pub struct POMMessage {}
 #[derive(Serialize, Deserialize, Debug)]
-struct PODMessage {}
+pub struct PODMessage {}
 #[derive(Serialize, Deserialize, Debug)]
-struct POAMessage {}
+pub struct POAMessage {}
 
 #[derive(Serialize, Deserialize, Debug)]
-struct CheckPointMessage {}
+pub struct CheckPointMessage {}
 
 #[derive(Serialize, Deserialize, Debug)]
-enum Message {
+pub enum Message {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
     ClientResponse(ClientResponseMessage),
