@@ -5,12 +5,11 @@ use std::vec::Vec;
 
 enum MessageType {
     // 4.4 Sequence Number Assignment
-    Request,   // Client Request (Request)
-    OR,        // OrderedRequest (Request)
-    SpecReply, // SpecReply (Reply, in response to `Request` from client)
-    Commit,    // Commit (Request)
-    Reply,     // Reply (Reply, in response to client request)
-    FillHole,  // Fill Hole (Reply, in response to `Commit` or `OR` from server)
+    Request,        // Client Request (Request)
+    OR,             // OrderedRequest (Request)
+    Commit,         // Commit (Request)
+    ClientResponse, // Client Response (Response)
+    FillHole,       // Fill Hole (Reply, in response to `Commit` or `OR` from server)
 
     // 4.5 View Change Protocol
     IHateThePrimary, // IHateThePrimary (Request)
