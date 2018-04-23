@@ -1,6 +1,7 @@
 #![feature(plugin, use_extern_macros)]
 #![plugin(tarpc_plugins)]
 
+extern crate bincode;
 extern crate serde;
 
 #[macro_use]

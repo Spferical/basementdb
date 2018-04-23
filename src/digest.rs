@@ -1,7 +1,6 @@
+use bincode::serialize;
 use serde::Serialize;
 use sodiumoxide::crypto::hash::{Digest, sha512};
-use tarpc::bincode::Infinite;
-use tarpc::bincode::serialize;
 
 /// A 512-byte SHA-512 hash
 pub type HashDigest = [u64; 4];
@@ -31,7 +30,7 @@ fn conv(digest: [u8; 64]) -> HashDigest {
 /// The D() hash function from the Zeno paper. For the case of
 /// D(h_n, D(REQ_n+1)), just pass in a array of two HashDigests.
 pub fn D<T: Serialize>(obj: T) -> HashDigest {
-    let Digest(digest) = sha512::hash(&serialize(&obj, Infinite).unwrap());
+    let Digest(digest) = sha512::hash(&serialize(&obj).unwrap());
     return conv(digest);
 }
 

@@ -1,8 +1,7 @@
+use bincode::serialize;
 use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
 use sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
-use tarpc::bincode::Infinite;
-use tarpc::bincode::serialize;
 
 /// A signed object.
 ///
@@ -31,7 +30,7 @@ pub fn gen_keys() -> KeyPair {
 impl<T: Serialize> Signed<T> {
     /// Create new `Signed<>` object; signed with private key `private_key`.
     pub fn new(base: T, private_key: &Private) -> Signed<T> {
-        let m: Vec<u8> = serialize(&base, Infinite).unwrap();
+        let m: Vec<u8> = serialize(&base).unwrap();
 
         let sig = sign_detached(&m, private_key);
         return Signed {
@@ -43,7 +42,7 @@ impl<T: Serialize> Signed<T> {
     /// Verify that an object is signed with a public key `public_key`.
     /// If so, return the underlying object, otherwise, don't.
     pub fn verify(self, public_key: &Public) -> Option<T> {
-        let m: Vec<u8> = serialize(&(self.base), Infinite).unwrap();
+        let m: Vec<u8> = serialize(&(self.base)).unwrap();
 
         if verify_detached(&(self.signature), &m, public_key) {
             return Some(self.base);
