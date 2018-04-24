@@ -4,6 +4,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -32,7 +33,10 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Option<String> {
 
     'outer: loop {
         match sock.read(&mut buf) {
-            Err(err) => println!("Unable to read from TCP stream: {:?}", err),
+            Err(err) => {
+                println!("Unable to read from TCP stream: {:?}", err);
+                break;
+            }
             Ok(num_bytes) => {
                 for i in 0..num_bytes {
                     let c = buf[i];
@@ -91,7 +95,7 @@ pub fn start_server(
 }
 
 fn handle_reader(mut client: TcpStream) {
-    client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)));
+    let _ = client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)));
 
     loop {
         let s: String;
@@ -144,7 +148,7 @@ impl TCPClient {
 }
 
 struct Network {
-    peer_send_clients: HashMap<signed::Public, Option<TCPClient>>,
+    peer_send_clients: Arc<Mutex<HashMap<signed::Public, Option<TCPClient>>>>,
     server_channel: Sender<TCPServerCommand>,
     my_ip_and_port: String,
 }
@@ -167,9 +171,28 @@ impl Network {
         let ip_copy = my_ip.clone();
         thread::spawn(move || start_server(ip_copy, rx, receive_callback));
         return Network {
-            peer_send_clients: peer_send_clients,
+            peer_send_clients: Arc::new(Mutex::new(peer_send_clients)),
             server_channel: tx,
             my_ip_and_port: my_ip.clone(),
         };
+    }
+
+    pub fn send(&mut self, m: Message, recipient: signed::Public) -> bool {
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        //let client_raw: &Option<TCPClient> = &psc[&recipient];
+        let client_raw: &mut Option<TCPClient> = psc.get_mut(&recipient).unwrap();
+
+        match client_raw {
+            Some(client) => {
+                let s: String = String::new();
+
+                // Somehow serialize the message
+
+                return client.send_obj(s);
+            }
+            None => {
+                return false;
+            }
+        }
     }
 }
