@@ -209,4 +209,8 @@ impl Network {
             )),
         };
     }
+
+    pub fn halt(&self) {
+        self.server_channel.send(TCPServerCommand::Halt).unwrap();
+    }
 }
