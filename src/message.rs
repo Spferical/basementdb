@@ -4,8 +4,9 @@ use digest::{HashChain, HashDigest};
 use serde::{Deserialize, Serialize};
 use signed;
 use std::io;
-use std::str::{FromStr, ToStr};
 use std::vec::Vec;
+
+use str_serialize::StrSerialize;
 
 enum MessageType {
     // 4.4 Sequence Number Assignment
