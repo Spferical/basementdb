@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
 use std::sync::mpsc;
@@ -21,13 +22,7 @@ const CONNECT_TIMEOUT: u64 = 30;
 pub enum TCPServerCommand {
 }
 
-pub struct TCPServer {
-    ip_and_port: String,
-    receiver: Receiver<TCPServerCommand>,
-    callback: fn(Message) -> Option<Message>,
-}
-
-pub fn read_string_from_socket(mut sock: &TcpStream) -> Option<String> {
+pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error> {
     let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
     let mut curr_buf: Vec<u8> = Vec::new();
 
@@ -53,20 +48,36 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Option<String> {
         }
 
         if curr_buf.len() > MAX_BUF_SIZE {
-            println!("Message too long!");
-            return None;
+            return Err(io::Error::new(io::ErrorKind::Other, "Message too long!"));
         }
     }
 
     match str::from_utf8(&curr_buf) {
         Err(e) => {
-            println!("Invalid string read from socket: {:?}!", e);
-            return None;
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Read invalid string from socket {:?}!", e),
+            ));
         }
         Ok(v) => {
-            return Some(v.to_string());
+            return Ok(v.to_string());
         }
     };
+}
+
+pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io::Error> {
+    let num_bytes: usize = sock.write(s.as_bytes()).unwrap();
+
+    if num_bytes == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "Unable to write to socket",
+        ));
+    }
+
+    sock.flush().unwrap();
+
+    Ok(())
 }
 
 pub fn start_server(
@@ -77,15 +88,9 @@ pub fn start_server(
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
 
-    let server = TCPServer {
-        ip_and_port: ip_and_port,
-        receiver: receiver,
-        callback: callback,
-    };
-
     for stream_result in listener.incoming() {
         match stream_result {
-            Err(err) => println!("Err {:?}", err),
+            Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
                 thread::spawn(move || handle_reader(stream, callback.clone()));
                 return;
@@ -94,26 +99,19 @@ pub fn start_server(
     }
 }
 
-fn handle_reader(mut client: TcpStream, callback: fn(Message) -> Option<Message>) {
-    client
-        .set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))
-        .unwrap();
+fn handle_reader(
+    client: TcpStream,
+    callback: fn(Message) -> Option<Message>,
+) -> Result<(), io::Error> {
+    client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
+    client.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
     loop {
-        match read_string_from_socket(&client) {
-            Some(v) => {
-                // Deserialize and call callback
-                let potential_response = callback(Message::str_deserialize(&v));
-                match potential_response {
-                    Some(resp) => {
-                        client
-                            .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))
-                            .unwrap();
-                        client.write(resp.str_serialize()).unwrap();
-                        client.flush().unwrap();
-                    }
-                }
-            }
+        let v = read_string_from_socket(&client)?;
+        let potential_response = callback(Message::str_deserialize(&v)?);
+        return match potential_response {
+            None => Ok(()),
+            Some(resp) => write_string_on_socket(&client, &(resp.str_serialize()?)),
         };
     }
 }
@@ -123,36 +121,18 @@ pub struct TCPClient {
     stream: TcpStream,
 }
 
-pub fn connect_to_server(ip_and_port: String) -> Option<TCPClient> {
+pub fn connect_to_server(ip_and_port: String) -> Result<TCPClient, io::Error> {
     let sock_addr: SocketAddr = ip_and_port.parse().unwrap();
     if let Ok(stream) = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0)) {
-        return Some(TCPClient {
+        return Ok(TCPClient {
             ip_and_port: ip_and_port,
             stream: stream,
         });
     } else {
-        println!("Failed to connect!");
-        return None;
-    }
-}
-
-impl TCPClient {
-    pub fn send_obj(&mut self, m: String) -> bool {
-        self.stream
-            .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)));
-        match self.stream.write(m.as_bytes()) {
-            Err(err) => {
-                println!("Unable to write to TCP stream: {:?}", err);
-                return false;
-            }
-            Ok(bytes_written) => {
-                /*if bytes_written != m.as_bytes.len() {
-                    println!("Hmmm... write wrote fewer bytes than expected...");
-                }*/
-                self.stream.flush().unwrap();
-                return true;
-            }
-        };
+        return Err(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "Failed to connect",
+        ));
     }
 }
 
@@ -172,7 +152,7 @@ impl Network {
             .into_iter()
             .map(
                 |(p, o): (signed::Public, String)| -> (signed::Public, Option<TCPClient>) {
-                    (p, connect_to_server(o.to_string()))
+                    (p, connect_to_server(o.to_string()).ok())
                 },
             )
             .collect();
@@ -186,19 +166,24 @@ impl Network {
         };
     }
 
-    pub fn send(&mut self, m: Message, recipient: signed::Public) -> bool {
+    pub fn send(&mut self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         let client_raw: &mut Option<TCPClient> = psc.get_mut(&recipient).unwrap();
 
-        match client_raw {
+        return match client_raw {
             Some(client) => {
-                let s: String = m.str_serialize();
+                let s: String = m.str_serialize()?;
 
-                return client.send_obj(s);
+                &client
+                    .stream
+                    .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
+
+                write_string_on_socket(&client.stream, &s)
             }
-            None => {
-                return false;
-            }
-        }
+            None => Err(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "Invalid client!",
+            )),
+        };
     }
 }
