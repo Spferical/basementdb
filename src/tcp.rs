@@ -66,7 +66,7 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error
 }
 
 pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io::Error> {
-    let num_bytes: usize = sock.write(s.as_bytes()).unwrap();
+    let num_bytes: usize = sock.write(s.as_bytes())?;
 
     if num_bytes == 0 {
         return Err(io::Error::new(
@@ -75,7 +75,7 @@ pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io
         ));
     }
 
-    sock.flush().unwrap();
+    sock.flush()?;
 
     Ok(())
 }
