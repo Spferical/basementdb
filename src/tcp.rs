@@ -21,6 +21,7 @@ const CONNECT_TIMEOUT: u64 = 30;
 
 #[derive(Clone)]
 pub enum TCPServerCommand {
+    Halt,
 }
 
 pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error> {
@@ -89,31 +90,51 @@ pub fn start_server(
 ) {
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
+    let alive = Arc::new(Mutex::new(true));
 
     for stream_result in listener.incoming() {
         match stream_result {
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
-                thread::spawn(move || handle_reader(stream, callback.clone()));
+                thread::spawn(move || handle_reader(stream, callback.clone(), alive));
                 return;
             }
         };
+
+        match receiver.try_recv() {
+            Err(_) => continue,
+            Ok(cmd) => match cmd {
+                TCPServerCommand::Halt => {
+                    *(alive.lock().unwrap()) = false;
+                    return;
+                }
+            },
+        }
     }
 }
 
 fn handle_reader(
     client: TcpStream,
     callback: fn(Message) -> Option<Message>,
+    alive: Arc<Mutex<bool>>,
 ) -> Result<(), io::Error> {
     client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
     client.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
     loop {
         let v = read_string_from_socket(&client)?;
+
+        // Lets check if we're still alive...
+        {
+            if !*(alive.lock().unwrap()) {
+                return Ok(());
+            }
+        }
+
         let potential_response = callback(Message::str_deserialize(&v)?);
-        return match potential_response {
-            None => Ok(()),
-            Some(resp) => write_string_on_socket(&client, &(Message::str_serialize(&resp)?)),
+        match potential_response {
+            None => {}
+            Some(resp) => write_string_on_socket(&client, &(Message::str_serialize(&resp)?))?,
         };
     }
 }
