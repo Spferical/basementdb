@@ -87,26 +87,34 @@ pub fn start_server(
         match stream_result {
             Err(err) => println!("Err {:?}", err),
             Ok(stream) => {
-                thread::spawn(move || handle_reader(stream));
+                thread::spawn(move || handle_reader(stream, callback.clone()));
                 return;
             }
         };
     }
 }
 
-fn handle_reader(mut client: TcpStream) {
-    let _ = client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)));
+fn handle_reader(mut client: TcpStream, callback: fn(Message) -> Option<Message>) {
+    client
+        .set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))
+        .unwrap();
 
     loop {
-        let s: String;
         match read_string_from_socket(&client) {
-            None => {
-                return;
+            Some(v) => {
+                // Deserialize and call callback
+                let potential_response = callback(Message::str_deserialize(&v));
+                match potential_response {
+                    Some(resp) => {
+                        client
+                            .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))
+                            .unwrap();
+                        client.write(resp.str_serialize()).unwrap();
+                        client.flush().unwrap();
+                    }
+                }
             }
-            Some(v) => s = v,
         };
-
-        // Deserialize and call callback
     }
 }
 
@@ -140,7 +148,8 @@ impl TCPClient {
             Ok(bytes_written) => {
                 /*if bytes_written != m.as_bytes.len() {
                     println!("Hmmm... write wrote fewer bytes than expected...");
-                  }*/
+                }*/
+                self.stream.flush().unwrap();
                 return true;
             }
         };
@@ -179,14 +188,11 @@ impl Network {
 
     pub fn send(&mut self, m: Message, recipient: signed::Public) -> bool {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        //let client_raw: &Option<TCPClient> = &psc[&recipient];
         let client_raw: &mut Option<TCPClient> = psc.get_mut(&recipient).unwrap();
 
         match client_raw {
             Some(client) => {
-                let s: String = String::new();
-
-                // Somehow serialize the message
+                let s: String = m.str_serialize();
 
                 return client.send_obj(s);
             }

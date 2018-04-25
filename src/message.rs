@@ -1,4 +1,7 @@
+use bincode::{deserialize, serialize};
+use data_encoding::BASE64;
 use digest::{HashChain, HashDigest};
+use serde::Error;
 use serde::{Deserialize, Serialize};
 use signed;
 use std::vec::Vec;
@@ -130,4 +133,16 @@ pub enum Message {
     POA(POAMessage),
 
     CheckPoint(CheckPointMessage),
+}
+
+impl Message {
+    pub fn str_serialize(&self) -> Result<String, Error> {
+        let binary_encoding = serialize(self)?;
+        return BASE64.encode(&binary_encoding);
+    }
+
+    pub fn str_deserialize(s: &String) -> Result<Message, Error> {
+        let binary_encoding = BASE64.decode(s.as_bytes())?;
+        return deserialize(&binary_encoding);
+    }
 }

@@ -2,6 +2,7 @@
 #![plugin(tarpc_plugins)]
 
 extern crate bincode;
+extern crate data_encoding;
 extern crate serde;
 
 #[macro_use]
