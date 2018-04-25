@@ -4,10 +4,13 @@ use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
 use std::io;
 
+/// Objects that are StrSerialize are serialized by bincode -> b64encode,
+/// not json.
 pub trait StrSerialize<T>
 where
     T: Serialize + for<'a> Deserialize<'a>,
 {
+    /// Converts Object -> bincode's serialize -> String.
     fn str_serialize(self_obj: &T) -> Result<String, io::Error> {
         let binary_encoding_raw = serialize(self_obj);
         return match binary_encoding_raw {
@@ -16,6 +19,7 @@ where
         };
     }
 
+    /// Converts String -> bincode's deserialize -> Object.
     fn str_deserialize(s: &String) -> Result<T, io::Error> {
         // Don't understand what's wrong with pattern matching here...
         let dec = BASE64.decode(s.as_bytes());

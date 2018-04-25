@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 use sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
 use sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
 
+use str_serialize::StrSerialize;
+
 /// A signed object.
 ///
 /// Construct one of these by creating a public-private keypair
 /// and then using `Signed::new()`
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
 pub struct Signed<T: Serialize> {
     base: T,
     signature: Signature,
@@ -52,9 +54,18 @@ impl<T: Serialize> Signed<T> {
     }
 }
 
+/// Signed objects are string serializable too. This is important
+/// because we need to be able to send signed messages over the
+/// network.
+impl<T> StrSerialize<Signed<T>> for Signed<T>
+where
+    for<'a> T: Serialize + Deserialize<'a>,
+{
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{gen_keys, Signed};
+    use super::{gen_keys, Signed, StrSerialize};
 
     #[test]
     fn create_verify() {
@@ -67,5 +78,17 @@ mod tests {
 
         let read_obj = signed_obj.verify(&public_key);
         assert_eq!(read_obj.unwrap(), obj);
+    }
+
+    #[test]
+    fn signed_serialization_works() {
+        let (_, private_key) = gen_keys();
+
+        let obj = 7;
+
+        let signed_obj = Signed::new(obj, &private_key);
+        let str_rep: String = Signed::str_serialize(&signed_obj).unwrap();
+        let deserialized_signed_obj = Signed::str_deserialize(&str_rep).unwrap();
+        assert_eq!(deserialized_signed_obj, signed_obj);
     }
 }
