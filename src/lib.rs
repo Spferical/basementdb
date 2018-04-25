@@ -17,5 +17,6 @@ extern crate sodiumoxide;
 pub mod digest;
 pub mod message;
 pub mod signed;
+pub mod str_serialize;
 pub mod tcp;
 pub mod zeno;

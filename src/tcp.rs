@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use message::Message;
 use signed;
+use str_serialize::StrSerialize;
 
 const BUFFER_SIZE: usize = 8 * 1024;
 const MAX_BUF_SIZE: usize = 1048576;
@@ -33,6 +34,10 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error
                 break;
             }
             Ok(num_bytes) => {
+                if num_bytes == 0 {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Read timed out"));
+                }
+
                 for i in 0..num_bytes {
                     let c = buf[i];
                     curr_buf.push(c);
@@ -69,10 +74,7 @@ pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io
     let num_bytes: usize = sock.write(s.as_bytes())?;
 
     if num_bytes == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::WriteZero,
-            "Unable to write to socket",
-        ));
+        return Err(io::Error::new(io::ErrorKind::WriteZero, "Write timed out"));
     }
 
     sock.flush()?;
@@ -111,7 +113,7 @@ fn handle_reader(
         let potential_response = callback(Message::str_deserialize(&v)?);
         return match potential_response {
             None => Ok(()),
-            Some(resp) => write_string_on_socket(&client, &(resp.str_serialize()?)),
+            Some(resp) => write_string_on_socket(&client, &(Message::str_serialize(&resp)?)),
         };
     }
 }
@@ -172,7 +174,7 @@ impl Network {
 
         return match client_raw {
             Some(client) => {
-                let s: String = m.str_serialize()?;
+                let s: String = Message::str_serialize(&m)?;
 
                 &client
                     .stream

@@ -4,6 +4,7 @@ use digest::{HashChain, HashDigest};
 use serde::{Deserialize, Serialize};
 use signed;
 use std::io;
+use std::str::{FromStr, ToStr};
 use std::vec::Vec;
 
 enum MessageType {
@@ -135,34 +136,4 @@ pub enum Message {
     CheckPoint(CheckPointMessage),
 }
 
-impl Message {
-    pub fn str_serialize(&self) -> Result<String, io::Error> {
-        let binary_encoding_raw = serialize(self);
-        return match binary_encoding_raw {
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, "str_serialize failed")),
-            Ok(binary_encoding) => Ok(BASE64.encode(&binary_encoding)),
-        };
-    }
-
-    pub fn str_deserialize(s: &String) -> Result<Message, io::Error> {
-        // Don't understand what's wrong with pattern matching here...
-        let dec = BASE64.decode(s.as_bytes());
-
-        match dec {
-            Err(ae) => {
-                return Err(io::Error::new(io::ErrorKind::Other, "BASE64.decode failed"));
-            }
-            Ok(_) => {}
-        };
-
-        let binary_encoding = dec.unwrap();
-
-        match deserialize(&binary_encoding) {
-            Err(e) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "str_deserialize failed",
-            )),
-            Ok(deserialized) => return Ok(deserialized),
-        }
-    }
-}
+impl StrSerialize<Message> for Message {}
