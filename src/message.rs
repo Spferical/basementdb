@@ -6,6 +6,7 @@ use signed;
 use std::io;
 use std::vec::Vec;
 
+use signed::Signed;
 use str_serialize::StrSerialize;
 
 enum MessageType {
@@ -118,7 +119,7 @@ pub struct POAMessage {}
 pub struct CheckPointMessage {}
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum Message {
+pub enum UnsignedMessage {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
     ClientResponse(ClientResponseMessage),
@@ -135,6 +136,14 @@ pub enum Message {
     POA(POAMessage),
 
     CheckPoint(CheckPointMessage),
+}
+
+impl StrSerialize<Message> for UnsignedMessage {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Message {
+    Unsigned(UnsignedMessage),
+    Signed(Signed<UnsignedMessage>),
 }
 
 impl StrSerialize<Message> for Message {}
