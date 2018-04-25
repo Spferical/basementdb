@@ -14,7 +14,10 @@ where
     fn str_serialize(self_obj: &T) -> Result<String, io::Error> {
         let binary_encoding_raw = serialize(self_obj);
         return match binary_encoding_raw {
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, "str_serialize failed")),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("str_serialize failed: {:?}", e),
+            )),
             Ok(binary_encoding) => Ok(BASE64.encode(&binary_encoding)),
         };
     }
@@ -26,7 +29,10 @@ where
 
         match dec {
             Err(ae) => {
-                return Err(io::Error::new(io::ErrorKind::Other, "BASE64.decode failed"));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("BASE64.decode failed: {:?}", ae),
+                ));
             }
             Ok(_) => {}
         };
@@ -36,7 +42,7 @@ where
         match deserialize(&binary_encoding) {
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::Other,
-                "str_deserialize failed",
+                format!("str_deserialize failed: {:?}", e),
             )),
             Ok(deserialized) => return Ok(deserialized),
         }

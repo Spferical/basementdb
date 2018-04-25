@@ -1,9 +1,5 @@
-use bincode::{deserialize, serialize};
-use data_encoding::BASE64;
 use digest::{HashChain, HashDigest};
-use serde::{Deserialize, Serialize};
 use signed;
-use std::io;
 use std::vec::Vec;
 
 use signed::Signed;
