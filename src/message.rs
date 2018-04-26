@@ -31,15 +31,15 @@ enum MessageType {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RequestMessage {
     pub o: Vec<u8>,        // Operation to be performed
-    pub t: usize,          // Timestamp assigned by the client to each request
+    pub t: u64,            // Timestamp assigned by the client to each request
     pub c: signed::Public, // Client public key
     pub s: bool,           // Flag indicating if this is a strong operation
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderedRequestMessage {
-    pub v: usize,          // Current view number
-    pub n: usize,          // Highest sequence number executed
+    pub v: u64,            // Current view number
+    pub n: u64,            // Highest sequence number executed
     pub h: HashChain,      // History, a hash-chain digest of the requests
     pub d_req: HashDigest, // Digest of the current request
     pub i: signed::Public, // Primary public key
@@ -63,12 +63,12 @@ pub enum ConcreteClientResponseMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SpecReplyMessage {
-    pub v: usize,          // Current view number
-    pub n: usize,          // Highest sequence number executed
+    pub v: u64,            // Current view number
+    pub n: u64,            // Highest sequence number executed
     pub h: HashChain,      // History, a hash-chain digest of the requests
     pub d_r: HashDigest,   // Digest of the result `r`
     pub c: signed::Public, // Client public key
-    pub t: usize,          // Timestamp assigned by the client to each request
+    pub t: u64,            // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -79,19 +79,19 @@ pub struct CommitMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReplyMessage {
-    pub v: usize,          // Current view number
-    pub n: usize,          // Highest sequence number executed
+    pub v: u64,            // Current view number
+    pub n: u64,            // Highest sequence number executed
     pub h: HashChain,      // History, a hash-chain digest of the requests
     pub d_r: HashDigest,   // Digest of the result `r`
     pub c: signed::Public, // Client public key
-    pub t: usize,          // Timestamp assigned by the client to each request
+    pub t: u64,            // Timestamp assigned by the client to each request
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FillHoleMessage {
-    pub v: usize,          // Current view number
-    pub n: usize,          // Highest sequence number executed
-    pub OR_n: usize,       // OrderedRequestMessage.n
+    pub v: u64,            // Current view number
+    pub n: u64,            // Highest sequence number executed
+    pub OR_n: u64,         // OrderedRequestMessage.n
     pub i: signed::Public, // Primary public key
 }
 
