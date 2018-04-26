@@ -1,5 +1,7 @@
+use bufstream::BufStream;
 use std::collections::HashMap;
 use std::io;
+use std::io::BufRead;
 use std::io::Write;
 use std::marker::Send;
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -9,8 +11,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use bufstream::BufStream;
-use std::io::BufRead;
 
 use message::Message;
 use signed;
@@ -73,7 +73,11 @@ pub fn write_string_on_socket<T: Write>(mut sock: T, s: String) -> Result<(), io
 
 type ServerCallback<T> = (fn(T, Message, Network) -> Option<Message>, T);
 
-fn invoke<T: Clone>(callback: ServerCallback<T>, message: Message, net: Network) -> Option<Message> {
+fn invoke<T: Clone>(
+    callback: ServerCallback<T>,
+    message: Message,
+    net: Network,
+) -> Option<Message> {
     return callback.0(callback.1, message, net);
 }
 
@@ -118,13 +122,10 @@ fn handle_reader<T: Clone>(
     client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
     client.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
-    let mut bufclient = BufStream::with_capacities(
-        MAX_BUF_SIZE, MAX_BUF_SIZE, client);
+    let mut bufclient = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, client);
 
     loop {
         let v = read_string_from_socket(&mut bufclient)?;
-
-        println!("Read string {:?}", v);
 
         // Lets check if we're still alive...
         {
@@ -133,7 +134,8 @@ fn handle_reader<T: Clone>(
             }
         }
 
-        let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
+        let potential_response =
+            invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
         match potential_response {
             None => {}
             Some(resp) => write_string_on_socket(&mut bufclient, Message::str_serialize(&resp)?)?,
@@ -241,7 +243,6 @@ impl Network {
         thread::spawn(move || retry_dead_connections(psc1, alive1));
 
         return net;
-
     }
 
     pub fn send(&mut self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
@@ -283,7 +284,6 @@ mod tests {
 
     fn modify_state(state: Arc<Mutex<TestState>>, _: Message, _: Network) -> Option<Message> {
         (*state.lock().unwrap()).state += 1;
-        println!("state = {:?}", (*state.lock().unwrap()).state);
         None
     }
 
@@ -327,7 +327,6 @@ mod tests {
                 .is_ok()
             {
                 a += 1;
-                println!("a is {:?}!", a);
             }
         }
 
@@ -340,7 +339,6 @@ mod tests {
                 .is_ok()
             {
                 b += 1;
-                println!("b is {:?}!", b);
             }
         }
 
