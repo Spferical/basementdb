@@ -89,17 +89,18 @@ pub fn write_string_on_socket(mut sock: &TcpStream, s: String) -> Result<(), io:
     Ok(())
 }
 
-type ServerCallback<T> = (fn(Arc<Mutex<T>>, Message) -> Option<Message>, Arc<Mutex<T>>);
+type ServerCallback<T: Clone> = (fn(T, Message, Network) -> Option<Message>, T);
 
-fn invoke<T>(callback: ServerCallback<T>, message: Message) -> Option<Message> {
-    return callback.0(callback.1, message);
+fn invoke<T: Clone>(callback: ServerCallback<T>, message: Message, net: Network) -> Option<Message> {
+    return callback.0(callback.1, message, net);
 }
 
-pub fn start_server<'a, T: 'static + Send>(
-    ip_and_port: String,
+pub fn start_server<'a, T: 'static + Send + Clone>(
+    net: Network,
     receiver: Receiver<TCPServerCommand>,
     callback: ServerCallback<T>,
 ) {
+    let ip_and_port = net.my_ip_and_port.clone();
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
     let alive = Arc::new(Mutex::new(true));
@@ -108,7 +109,8 @@ pub fn start_server<'a, T: 'static + Send>(
         match stream_result {
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
-                thread::spawn(move || handle_reader(stream, callback, alive));
+                let net1 = net.clone();
+                thread::spawn(move || handle_reader(net1, stream, callback, alive));
                 return;
             }
         };
@@ -125,7 +127,8 @@ pub fn start_server<'a, T: 'static + Send>(
     }
 }
 
-fn handle_reader<T>(
+fn handle_reader<T: Clone>(
+    net: Network,
     client: TcpStream,
     callback: ServerCallback<T>,
     alive: Arc<Mutex<bool>>,
@@ -145,7 +148,7 @@ fn handle_reader<T>(
             }
         }
 
-        let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?);
+        let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
         match potential_response {
             None => {}
             Some(resp) => write_string_on_socket(&client, Message::str_serialize(&resp)?)?,
@@ -220,7 +223,8 @@ fn retry_dead_connections(
     }
 }
 
-struct Network {
+#[derive(Clone)]
+pub struct Network {
     peer_send_clients: Arc<Mutex<HashMap<signed::Public, TCPClient>>>,
     server_channel: Sender<TCPServerCommand>,
     alive_state: Arc<Mutex<bool>>,
@@ -228,7 +232,7 @@ struct Network {
 }
 
 impl Network {
-    pub fn new<'a, T: 'static + Send>(
+    pub fn new<'a, T: 'static + Send + Clone>(
         my_ip: String,
         public_key_to_ip_map: HashMap<signed::Public, String>,
         receive_callback: ServerCallback<T>,
@@ -236,20 +240,23 @@ impl Network {
         let peer_send_clients: HashMap<signed::Public, TCPClient> =
             try_connecting_to_everyone(public_key_to_ip_map);
         let (tx, rx): (Sender<TCPServerCommand>, Receiver<TCPServerCommand>) = mpsc::channel();
-        let ip_copy = my_ip.clone();
         let psc = Arc::new(Mutex::new(peer_send_clients));
         let psc1 = psc.clone();
         let alive = Arc::new(Mutex::new(true));
         let alive1 = alive.clone();
-
-        thread::spawn(move || start_server(ip_copy, rx, receive_callback));
-        thread::spawn(move || retry_dead_connections(psc1, alive1));
-        return Network {
+        let net = Network {
             peer_send_clients: psc,
             server_channel: tx,
             alive_state: alive,
             my_ip_and_port: my_ip.clone(),
         };
+        let net1 = net.clone();
+
+        thread::spawn(move || start_server(net1, rx, receive_callback));
+        thread::spawn(move || retry_dead_connections(psc1, alive1));
+
+        return net;
+
     }
 
     pub fn send(&mut self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
@@ -289,7 +296,7 @@ mod tests {
         state: usize,
     }
 
-    fn modify_state(state: Arc<Mutex<TestState>>, m: Message) -> Option<Message> {
+    fn modify_state(state: Arc<Mutex<TestState>>, m: Message, _: Network) -> Option<Message> {
         (*state.lock().unwrap()).state += 1;
         println!("state = {:?}", (*state.lock().unwrap()).state);
         None
