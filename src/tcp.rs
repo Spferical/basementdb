@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::marker::Send;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
@@ -9,12 +9,13 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use bufstream::BufStream;
+use std::io::BufRead;
 
 use message::Message;
 use signed;
 use str_serialize::StrSerialize;
 
-const BUFFER_SIZE: usize = 8 * 1024;
 const MAX_BUF_SIZE: usize = 1048576;
 const READ_TIMEOUT: u64 = 30;
 const WRITE_TIMEOUT: u64 = 30;
@@ -25,44 +26,25 @@ pub enum TCPServerCommand {
     Halt,
 }
 
-pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error> {
-    let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-    let mut curr_buf: Vec<u8> = Vec::new();
+pub fn read_string_from_socket(sock: &mut BufStream<TcpStream>) -> Result<String, io::Error> {
+    let mut buf: Vec<u8> = Vec::new();
 
-    'outer: loop {
-        match sock.read(&mut buf) {
-            Err(err) => {
-                println!("Unable to read from TCP stream: {:?}", err);
-                break;
-            }
-            Ok(num_bytes) => {
-                if num_bytes == 0 {
-                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Read timed out"));
-                }
-
-                for i in 0..num_bytes {
-                    let c = buf[i];
-                    if c == 0 {
-                        println!("Read null byte!");
-                        break 'outer;
-                    }
-                    curr_buf.push(c);
-                }
-
-                if num_bytes != BUFFER_SIZE {
-                    println!("Didn't read until the buffer size!");
-                    break 'outer;
-                }
-            }
+    match sock.read_until(0, &mut buf) {
+        Err(err) => {
+            println!("Unable to read from TCP stream: {:?}", err);
         }
-
-        if curr_buf.len() > MAX_BUF_SIZE {
-            println!("Message too long!");
-            return Err(io::Error::new(io::ErrorKind::Other, "Message too long!"));
+        Ok(num_bytes) => {
+            if num_bytes == 0 {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Read timed out"));
+            } else {
+                // remove the null byte
+                let l = buf.len();
+                buf.remove(l - 1);
+            }
         }
     }
 
-    match str::from_utf8(&curr_buf) {
+    match str::from_utf8(&buf) {
         Err(e) => {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -75,7 +57,7 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error
     };
 }
 
-pub fn write_string_on_socket(mut sock: &TcpStream, s: String) -> Result<(), io::Error> {
+pub fn write_string_on_socket<T: Write>(mut sock: T, s: String) -> Result<(), io::Error> {
     let mut byte_arr = s.into_bytes();
     byte_arr.push(0);
     let num_bytes: usize = sock.write(&byte_arr)?;
@@ -136,8 +118,11 @@ fn handle_reader<T: Clone>(
     client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
     client.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
+    let mut bufclient = BufStream::with_capacities(
+        MAX_BUF_SIZE, MAX_BUF_SIZE, client);
+
     loop {
-        let v = read_string_from_socket(&client)?;
+        let v = read_string_from_socket(&mut bufclient)?;
 
         println!("Read string {:?}", v);
 
@@ -151,7 +136,7 @@ fn handle_reader<T: Clone>(
         let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
         match potential_response {
             None => {}
-            Some(resp) => write_string_on_socket(&client, Message::str_serialize(&resp)?)?,
+            Some(resp) => write_string_on_socket(&mut bufclient, Message::str_serialize(&resp)?)?,
         };
     }
 }
@@ -269,7 +254,7 @@ impl Network {
 
                 stream.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
-                write_string_on_socket(&stream, s)
+                write_string_on_socket(stream, s)
             }
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
@@ -360,8 +345,8 @@ mod tests {
         }
 
         loop {
-            if (*test_state1.lock().unwrap()).state == 100
-                && (*test_state2.lock().unwrap()).state == 100
+            if (*test_state1.lock().unwrap()).state == 20
+                && (*test_state2.lock().unwrap()).state == 20
             {
                 break;
             }

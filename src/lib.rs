@@ -3,6 +3,7 @@
 extern crate bincode;
 extern crate data_encoding;
 extern crate serde;
+extern crate bufstream;
 
 #[macro_use]
 extern crate serde_derive;
