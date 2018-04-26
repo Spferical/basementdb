@@ -6,28 +6,29 @@ use message::{Message, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
 use tcp::Network;
 
-struct ZenoState {}
+struct ZenoState {
+    pubkeys: Vec<signed::Public>,
+}
 
 #[derive(Clone)]
 pub struct Zeno {
     me: signed::Public,
-    pubkeys: Vec<signed::Public>,
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Arc<Zeno>, _: RequestMessage, _: Network) -> Message {
+fn on_request_message(z: Zeno, _: RequestMessage, _: Network) -> Message {
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
 impl Zeno {
-    fn match_unsigned_message(z: Arc<Zeno>, m: UnsignedMessage, n: Network) -> Option<Message> {
+    fn match_unsigned_message(z: Zeno, m: UnsignedMessage, n: Network) -> Option<Message> {
         match m {
             UnsignedMessage::Request(rm) => Some(on_request_message(z, rm, n)),
             _ => None,
         }
     }
 
-    fn handle_message(z: Arc<Zeno>, m: Message, n: Network) -> Option<Message> {
+    fn handle_message(z: Zeno, m: Message, n: Network) -> Option<Message> {
         match m {
             Message::Unsigned(um) => Zeno::match_unsigned_message(z, um, n),
             Message::Signed(sm) => Zeno::match_unsigned_message(z, sm.base, n),
@@ -39,12 +40,14 @@ pub fn start_zeno(
     url: String,
     pubkey: signed::Public,
     pubkeys_to_url: HashMap<signed::Public, String>,
-) -> Arc<Zeno> {
-    let zeno = Arc::new(Zeno {
+) -> Zeno {
+    let zeno = Zeno {
         me: pubkey,
-        pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
-        state: Arc::new(Mutex::new(ZenoState {})),
-    });
+        state: Arc::new(Mutex::new(
+            ZenoState {
+            pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
+            })),
+    };
     Network::new(
         url,
         pubkeys_to_url,
