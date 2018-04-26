@@ -89,7 +89,7 @@ pub fn write_string_on_socket(mut sock: &TcpStream, s: String) -> Result<(), io:
     Ok(())
 }
 
-type ServerCallback<T: Clone> = (fn(T, Message, Network) -> Option<Message>, T);
+type ServerCallback<T> = (fn(T, Message, Network) -> Option<Message>, T);
 
 fn invoke<T: Clone>(callback: ServerCallback<T>, message: Message, net: Network) -> Option<Message> {
     return callback.0(callback.1, message, net);
@@ -296,7 +296,7 @@ mod tests {
         state: usize,
     }
 
-    fn modify_state(state: Arc<Mutex<TestState>>, m: Message, _: Network) -> Option<Message> {
+    fn modify_state(state: Arc<Mutex<TestState>>, _: Message, _: Network) -> Option<Message> {
         (*state.lock().unwrap()).state += 1;
         println!("state = {:?}", (*state.lock().unwrap()).state);
         None

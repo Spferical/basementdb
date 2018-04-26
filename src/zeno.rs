@@ -16,7 +16,7 @@ pub struct Zeno {
 }
 
 impl Zeno {
-    fn handle_message(z: Arc<Zeno>, m: Message, n: Network) -> Option<Message> {
+    fn handle_message(_: Arc<Zeno>, _: Message, _: Network) -> Option<Message> {
         None
     }
 }
@@ -37,8 +37,6 @@ pub fn start_zeno(
 
 #[cfg(test)]
 mod tests {
-    use super::start_zeno;
-
     #[test]
     fn basic() {}
 }
