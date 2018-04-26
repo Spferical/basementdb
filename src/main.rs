@@ -1,11 +1,7 @@
 extern crate basementdb;
 extern crate config;
-extern crate tarpc;
 
-use basementdb::zeno;
 use std::env;
-use tarpc::sync::client;
-use tarpc::sync::client::ClientExt;
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -13,7 +9,7 @@ fn main() {
         println!("USAGE: {} URL", args[0]);
         return;
     }
-    let our_url = args[1].clone();
+    let _url = args[1].clone();
 
     let mut settings = config::Config::default();
     settings.merge(config::File::with_name("config")).unwrap();
@@ -25,6 +21,7 @@ fn main() {
     let servers = settings.get::<Vec<String>>("servers").unwrap();
     println!("servers: {:?}", servers);
 
-    let z = zeno::ZenoService::new(our_url, servers);
-    z.run();
+    // TODO: read private and public key from path in config
+    // and start the server
+
 }

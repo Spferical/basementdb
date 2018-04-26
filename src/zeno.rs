@@ -1,77 +1,44 @@
-extern crate futures;
-extern crate tarpc;
-
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::mpsc;
-use std::thread;
-use zeno::futures::Future;
 
-use tarpc::future::client::ClientExt;
-use tarpc::future::{client, server};
-use tarpc::util::FirstSocketAddr;
-use tarpc::util::Never;
-use tokio_core::reactor;
+use message::Message;
+use signed;
+use tcp::Network;
 
-struct Zeno {
-    servers: HashMap<String, Option<SyncClient>>,
-}
-
-service! {
-    rpc echo(text: String) -> String;
-}
+struct ZenoState {}
 
 #[derive(Clone)]
-pub struct ZenoService {
+pub struct Zeno {
+    me: signed::Public,
+    pubkeys: Vec<signed::Public>,
+    state: Arc<Mutex<ZenoState>>,
+}
+
+impl Zeno {
+    fn handle_message(z: Arc<Zeno>, m: Message, n: Network) -> Option<Message> {
+        None
+    }
+}
+
+pub fn start_zeno(
     url: String,
-    zeno: Arc<Mutex<Zeno>>,
+    pubkey: signed::Public,
+    pubkeys_to_url: HashMap<signed::Public, String>,
+) -> Arc<Zeno> {
+    let zeno = Arc::new(Zeno {
+        me: pubkey,
+        pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
+        state: Arc::new(Mutex::new(ZenoState {})),
+    });
+    Network::new(url, pubkeys_to_url, (Zeno::handle_message, zeno.clone()));
+    zeno
 }
 
-impl FutureService for ZenoService {
-    type EchoFut = Result<String, Never>;
+#[cfg(test)]
+mod tests {
+    use super::start_zeno;
 
-    fn echo(&self, text: String) -> Self::EchoFut {
-        Ok(text)
-    }
-}
-
-impl ZenoService {
-    pub fn new(url: String, server_urls: Vec<String>) -> ZenoService {
-        let servers: HashMap<_, _> = server_urls
-            .iter()
-            .filter(|u| **u != url)
-            .map(|u| (u.clone(), None))
-            .collect();
-        ZenoService {
-            url: url,
-            zeno: Arc::new(Mutex::new(Zeno { servers: servers })),
-        }
-    }
-
-    /// starts the server and blocks until the server stops
-    pub fn run(&self) {
-        let mut reactor = reactor::Core::new().unwrap();
-        let clone = self.clone();
-        let url = clone.url.clone();
-        let (handle, server) = clone
-            .listen(
-                url.first_socket_addr(),
-                &reactor.handle(),
-                server::Options::default(),
-            )
-            .unwrap();
-        reactor.handle().spawn(server);
-        let options = client::Options::default().handle(reactor.handle());
-        reactor
-            .run(
-                FutureClient::connect(handle.addr(), options)
-                    .map_err(tarpc::Error::from)
-                    .and_then(|client| client.echo("Hello, world!".to_string()))
-                    .map(|resp| println!("{}", resp)),
-            )
-            .unwrap();
-    }
+    #[test]
+    fn basic() {}
 }
