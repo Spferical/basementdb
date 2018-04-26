@@ -43,10 +43,9 @@ pub fn start_zeno(
 ) -> Zeno {
     let zeno = Zeno {
         me: pubkey,
-        state: Arc::new(Mutex::new(
-            ZenoState {
+        state: Arc::new(Mutex::new(ZenoState {
             pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
-            })),
+        })),
     };
     Network::new(
         url,
