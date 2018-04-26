@@ -96,6 +96,11 @@ pub struct FillHoleMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct TestMessage {
+    pub c: signed::Public,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct IHateThePrimaryMessage {}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ViewChangeMessage {}
@@ -132,6 +137,9 @@ pub enum UnsignedMessage {
     POA(POAMessage),
 
     CheckPoint(CheckPointMessage),
+
+    // For debugging purposes
+    Test(TestMessage),
 }
 
 impl StrSerialize<Message> for UnsignedMessage {}

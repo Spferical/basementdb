@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
+use std::marker::Send;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
 use std::sync::mpsc;
@@ -83,10 +84,16 @@ pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io
     Ok(())
 }
 
-pub fn start_server(
+type ServerCallback<T> = (fn(Arc<Mutex<T>>, Message) -> Option<Message>, Arc<Mutex<T>>);
+
+fn invoke<T>(callback: ServerCallback<T>, message: Message) -> Option<Message> {
+    return callback.0(callback.1, message);
+}
+
+pub fn start_server<'a, T: 'static + Send>(
     ip_and_port: String,
     receiver: Receiver<TCPServerCommand>,
-    callback: fn(Message) -> Option<Message>,
+    callback: ServerCallback<T>,
 ) {
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
@@ -96,7 +103,7 @@ pub fn start_server(
         match stream_result {
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
-                thread::spawn(move || handle_reader(stream, callback.clone(), alive));
+                thread::spawn(move || handle_reader(stream, callback, alive));
                 return;
             }
         };
@@ -113,9 +120,9 @@ pub fn start_server(
     }
 }
 
-fn handle_reader(
+fn handle_reader<T>(
     client: TcpStream,
-    callback: fn(Message) -> Option<Message>,
+    callback: ServerCallback<T>,
     alive: Arc<Mutex<bool>>,
 ) -> Result<(), io::Error> {
     client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
@@ -131,7 +138,7 @@ fn handle_reader(
             }
         }
 
-        let potential_response = callback(Message::str_deserialize(&v)?);
+        let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?);
         match potential_response {
             None => {}
             Some(resp) => write_string_on_socket(&client, &(Message::str_serialize(&resp)?))?,
@@ -166,10 +173,10 @@ struct Network {
 }
 
 impl Network {
-    pub fn new(
+    pub fn new<'a, T: 'static + Send>(
         my_ip: String,
         public_key_to_ip_map: HashMap<signed::Public, String>,
-        receive_callback: fn(Message) -> Option<Message>,
+        receive_callback: ServerCallback<T>,
     ) -> Network {
         let peer_send_clients: HashMap<signed::Public, Option<TCPClient>> = public_key_to_ip_map
             .into_iter()
@@ -212,5 +219,61 @@ impl Network {
 
     pub fn halt(&self) {
         self.server_channel.send(TCPServerCommand::Halt).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Network;
+    use message::{Message, TestMessage, UnsignedMessage};
+    use signed;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    struct TestState {
+        state: bool,
+    }
+
+    fn modify_state(state: Arc<Mutex<TestState>>, m: Message) -> Option<Message> {
+        (*state.lock().unwrap()).state = true;
+        None
+    }
+
+    #[test]
+    fn two_network_send() {
+        let test_state = Arc::new(Mutex::new(TestState { state: false }));
+
+        let (public1, private1) = signed::gen_keys();
+        let (public2, private2) = signed::gen_keys();
+
+        let ip1 = "127.0.0.1:54321";
+        let ip2 = "127.0.0.1:54320";
+
+        let mut signed_ip_map_1: HashMap<signed::Public, String> = HashMap::new();
+        let mut signed_ip_map_2: HashMap<signed::Public, String> = HashMap::new();
+
+        signed_ip_map_1.insert(public2, ip2.clone().to_string());
+        signed_ip_map_2.insert(public1, ip1.clone().to_string());
+
+        let mut network1 = Network::new(
+            ip1.to_string(),
+            signed_ip_map_1,
+            (modify_state, test_state.clone()),
+        );
+        let network2 = Network::new(
+            ip2.to_string(),
+            signed_ip_map_2,
+            (modify_state, test_state.clone()),
+        );
+        network1.send(
+            Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
+            public2,
+        );
+
+        loop {
+            if (*test_state.lock().unwrap()).state {
+                break;
+            }
+        }
     }
 }
