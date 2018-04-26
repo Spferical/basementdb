@@ -146,6 +146,7 @@ fn handle_reader<T>(
     }
 }
 
+#[derive(Debug)]
 pub struct TCPClient {
     ip_and_port: String,
     stream: Result<TcpStream, io::Error>,
