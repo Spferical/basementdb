@@ -11,8 +11,8 @@ use str_serialize::StrSerialize;
 /// and then using `Signed::new()`
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
 pub struct Signed<T: Serialize> {
-    base: T,
-    signature: Signature,
+    pub base: T,
+    pub signature: Signature,
 }
 
 /// A Public-Private KeyPair

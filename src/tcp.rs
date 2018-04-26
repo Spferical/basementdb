@@ -42,19 +42,22 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error
 
                 for i in 0..num_bytes {
                     let c = buf[i];
-                    curr_buf.push(c);
                     if c == 0 {
+                        println!("Read null byte!");
                         break 'outer;
                     }
+                    curr_buf.push(c);
                 }
 
                 if num_bytes != BUFFER_SIZE {
+                    println!("Didn't read until the buffer size!");
                     break 'outer;
                 }
             }
         }
 
         if curr_buf.len() > MAX_BUF_SIZE {
+            println!("Message too long!");
             return Err(io::Error::new(io::ErrorKind::Other, "Message too long!"));
         }
     }
@@ -72,8 +75,10 @@ pub fn read_string_from_socket(mut sock: &TcpStream) -> Result<String, io::Error
     };
 }
 
-pub fn write_string_on_socket(mut sock: &TcpStream, s: &String) -> Result<(), io::Error> {
-    let num_bytes: usize = sock.write(s.as_bytes())?;
+pub fn write_string_on_socket(mut sock: &TcpStream, s: String) -> Result<(), io::Error> {
+    let mut byte_arr = s.into_bytes();
+    byte_arr.push(0);
+    let num_bytes: usize = sock.write(&byte_arr)?;
 
     if num_bytes == 0 {
         return Err(io::Error::new(io::ErrorKind::WriteZero, "Write timed out"));
@@ -131,6 +136,8 @@ fn handle_reader<T>(
     loop {
         let v = read_string_from_socket(&client)?;
 
+        println!("Read string {:?}", v);
+
         // Lets check if we're still alive...
         {
             if !*(alive.lock().unwrap()) {
@@ -141,7 +148,7 @@ fn handle_reader<T>(
         let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?);
         match potential_response {
             None => {}
-            Some(resp) => write_string_on_socket(&client, &(Message::str_serialize(&resp)?))?,
+            Some(resp) => write_string_on_socket(&client, Message::str_serialize(&resp)?)?,
         };
     }
 }
@@ -255,7 +262,7 @@ impl Network {
 
                 stream.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
-                write_string_on_socket(&stream, &s)
+                write_string_on_socket(&stream, s)
             }
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
@@ -279,17 +286,19 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     struct TestState {
-        state: bool,
+        state: usize,
     }
 
     fn modify_state(state: Arc<Mutex<TestState>>, m: Message) -> Option<Message> {
-        (*state.lock().unwrap()).state = true;
+        (*state.lock().unwrap()).state += 1;
+        println!("state = {:?}", (*state.lock().unwrap()).state);
         None
     }
 
     #[test]
     fn two_network_send() {
-        let test_state = Arc::new(Mutex::new(TestState { state: false }));
+        let test_state1 = Arc::new(Mutex::new(TestState { state: 0 }));
+        let test_state2 = Arc::new(Mutex::new(TestState { state: 0 }));
 
         let (public1, private1) = signed::gen_keys();
         let (public2, private2) = signed::gen_keys();
@@ -306,24 +315,47 @@ mod tests {
         let mut network1 = Network::new(
             ip1.to_string(),
             signed_ip_map_1,
-            (modify_state, test_state.clone()),
+            (modify_state, test_state1.clone()),
         );
-        let network2 = Network::new(
+        let mut network2 = Network::new(
             ip2.to_string(),
             signed_ip_map_2,
-            (modify_state, test_state.clone()),
+            (modify_state, test_state2.clone()),
         );
 
-        while network1
-            .send(
-                Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
-                public2,
-            )
-            .is_err()
-        {}
+        let mut a = 0;
+        let mut b = 0;
+
+        while a < 20 {
+            if network1
+                .send(
+                    Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
+                    public2,
+                )
+                .is_ok()
+            {
+                a += 1;
+                println!("a is {:?}!", a);
+            }
+        }
+
+        while b < 20 {
+            if network2
+                .send(
+                    Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public2 })),
+                    public1,
+                )
+                .is_ok()
+            {
+                b += 1;
+                println!("b is {:?}!", b);
+            }
+        }
 
         loop {
-            if (*test_state.lock().unwrap()).state {
+            if (*test_state1.lock().unwrap()).state == 100
+                && (*test_state2.lock().unwrap()).state == 100
+            {
                 break;
             }
         }
