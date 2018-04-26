@@ -148,21 +148,74 @@ fn handle_reader<T>(
 
 pub struct TCPClient {
     ip_and_port: String,
-    stream: TcpStream,
+    stream: Result<TcpStream, io::Error>,
 }
 
-pub fn connect_to_server(ip_and_port: String) -> Result<TCPClient, io::Error> {
+pub fn connect_to_server(ip_and_port: String) -> TCPClient {
     let sock_addr: SocketAddr = ip_and_port.parse().unwrap();
-    let stream = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0))?;
-    return Ok(TCPClient {
+    let stream = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0));
+    return TCPClient {
         ip_and_port: ip_and_port,
         stream: stream,
-    });
+    };
+}
+
+fn try_connecting_to_everyone(
+    h: HashMap<signed::Public, String>,
+) -> HashMap<signed::Public, TCPClient> {
+    h.into_iter()
+        .map(
+            |(p, o): (signed::Public, String)| -> (signed::Public, TCPClient) {
+                let r1 = connect_to_server(o.to_string());
+                match &r1.stream {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Tried to connect, but failed due to: {:?}", e);
+                    }
+                };
+                (p, r1)
+            },
+        )
+        .collect()
+}
+
+fn retry_dead_connections(
+    p: Arc<Mutex<HashMap<signed::Public, TCPClient>>>,
+    alive: Arc<Mutex<bool>>,
+) {
+    loop {
+        {
+            if !(*alive.lock().unwrap()) {
+                return;
+            }
+        }
+
+        thread::sleep(Duration::new(1, 0));
+
+        let retries: HashMap<signed::Public, String>;
+
+        {
+            let conns = &*p.lock().unwrap();
+            retries = conns
+                .into_iter()
+                .filter(|(_, v)| v.stream.is_err())
+                .map(|(p, v)| (p.clone(), v.ip_and_port.clone()))
+                .collect();
+        }
+
+        let updated = try_connecting_to_everyone(retries);
+
+        {
+            let conns = &mut *p.lock().unwrap();
+            conns.extend(updated);
+        }
+    }
 }
 
 struct Network {
-    peer_send_clients: Arc<Mutex<HashMap<signed::Public, Option<TCPClient>>>>,
+    peer_send_clients: Arc<Mutex<HashMap<signed::Public, TCPClient>>>,
     server_channel: Sender<TCPServerCommand>,
+    alive_state: Arc<Mutex<bool>>,
     my_ip_and_port: String,
 }
 
@@ -172,56 +225,46 @@ impl Network {
         public_key_to_ip_map: HashMap<signed::Public, String>,
         receive_callback: ServerCallback<T>,
     ) -> Network {
-        let peer_send_clients: HashMap<signed::Public, Option<TCPClient>> = public_key_to_ip_map
-            .into_iter()
-            .map(
-                |(p, o): (signed::Public, String)| -> (signed::Public, Option<TCPClient>) {
-                    let r1 = connect_to_server(o.to_string());
-                    (
-                        p,
-                        match r1 {
-                            Err(e) => {
-                                eprintln!("Tried to connect, but failed due to: {:?}", e);
-                                None
-                            }
-                            Ok(r) => Some(r),
-                        },
-                    )
-                },
-            )
-            .collect();
+        let peer_send_clients: HashMap<signed::Public, TCPClient> =
+            try_connecting_to_everyone(public_key_to_ip_map);
         let (tx, rx): (Sender<TCPServerCommand>, Receiver<TCPServerCommand>) = mpsc::channel();
         let ip_copy = my_ip.clone();
+        let psc = Arc::new(Mutex::new(peer_send_clients));
+        let psc1 = psc.clone();
+        let alive = Arc::new(Mutex::new(true));
+        let alive1 = alive.clone();
+
         thread::spawn(move || start_server(ip_copy, rx, receive_callback));
+        thread::spawn(move || retry_dead_connections(psc1, alive1));
         return Network {
-            peer_send_clients: Arc::new(Mutex::new(peer_send_clients)),
+            peer_send_clients: psc,
             server_channel: tx,
+            alive_state: alive,
             my_ip_and_port: my_ip.clone(),
         };
     }
 
     pub fn send(&mut self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        let client_raw: &mut Option<TCPClient> = psc.get_mut(&recipient).unwrap();
+        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
 
-        return match client_raw {
-            Some(client) => {
+        return match &client_raw.stream {
+            Ok(stream) => {
                 let s: String = Message::str_serialize(&m)?;
 
-                &client
-                    .stream
-                    .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
+                stream.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
-                write_string_on_socket(&client.stream, &s)
+                write_string_on_socket(&stream, &s)
             }
-            None => Err(io::Error::new(
+            Err(e) => Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
-                "Invalid client!",
+                format!("Invalid client... it failed due to: {:?}", e),
             )),
         };
     }
 
     pub fn halt(&self) {
+        *self.alive_state.lock().unwrap() = false;
         self.server_channel.send(TCPServerCommand::Halt).unwrap();
     }
 }
