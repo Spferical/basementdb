@@ -313,10 +313,14 @@ mod tests {
             signed_ip_map_2,
             (modify_state, test_state.clone()),
         );
-        network1.send(
-            Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
-            public2,
-        );
+
+        while network1
+            .send(
+                Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
+                public2,
+            )
+            .is_err()
+        {}
 
         loop {
             if (*test_state.lock().unwrap()).state {
