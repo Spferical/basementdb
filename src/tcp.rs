@@ -153,17 +153,11 @@ pub struct TCPClient {
 
 pub fn connect_to_server(ip_and_port: String) -> Result<TCPClient, io::Error> {
     let sock_addr: SocketAddr = ip_and_port.parse().unwrap();
-    if let Ok(stream) = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0)) {
-        return Ok(TCPClient {
-            ip_and_port: ip_and_port,
-            stream: stream,
-        });
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::ConnectionRefused,
-            "Failed to connect",
-        ));
-    }
+    let stream = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0))?;
+    return Ok(TCPClient {
+        ip_and_port: ip_and_port,
+        stream: stream,
+    });
 }
 
 struct Network {
@@ -182,7 +176,17 @@ impl Network {
             .into_iter()
             .map(
                 |(p, o): (signed::Public, String)| -> (signed::Public, Option<TCPClient>) {
-                    (p, connect_to_server(o.to_string()).ok())
+                    let r1 = connect_to_server(o.to_string());
+                    (
+                        p,
+                        match r1 {
+                            Err(e) => {
+                                eprintln!("Tried to connect, but failed due to: {:?}", e);
+                                None
+                            }
+                            Ok(r) => Some(r),
+                        },
+                    )
                 },
             )
             .collect();
