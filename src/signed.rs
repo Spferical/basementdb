@@ -9,7 +9,7 @@ use str_serialize::StrSerialize;
 ///
 /// Construct one of these by creating a public-private keypair
 /// and then using `Signed::new()`
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Hash, Clone)]
 pub struct Signed<T: Serialize> {
     pub base: T,
     pub signature: Signature,
