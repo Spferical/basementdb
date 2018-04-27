@@ -28,7 +28,7 @@ fn conv(digest: [u8; 64]) -> HashDigest {
 }
 
 /// The D() hash function from the Zeno paper. For the case of
-/// d(h_n, D(REQ_n+1)), just pass in a array of two HashDigests.
+/// d(h_n, d(REQ_n+1)), just pass in a array of two HashDigests.
 pub fn d<T: Serialize>(obj: T) -> HashDigest {
     let Digest(digest) = sha512::hash(&serialize(&obj).unwrap());
     return conv(digest);
