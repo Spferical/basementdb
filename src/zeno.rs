@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use message::Message;
+use message::{Message, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
 use tcp::Network;
 
@@ -15,9 +15,23 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
+fn on_request_message(z: Arc<Zeno>, m: RequestMessage, n: Network) -> Message {
+    return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
+}
+
 impl Zeno {
-    fn handle_message(_: Arc<Zeno>, _: Message, _: Network) -> Option<Message> {
-        None
+    fn match_unsigned_message(z: Arc<Zeno>, m: UnsignedMessage, n: Network) -> Option<Message> {
+        match m {
+            UnsignedMessage::Request(rm) => Some(on_request_message(z, rm, n)),
+            _ => None,
+        }
+    }
+
+    fn handle_message(z: Arc<Zeno>, m: Message, n: Network) -> Option<Message> {
+        match m {
+            Message::Unsigned(um) => Zeno::match_unsigned_message(z, um, n),
+            Message::Signed(sm) => Zeno::match_unsigned_message(z, sm.base, n),
+        }
     }
 }
 
