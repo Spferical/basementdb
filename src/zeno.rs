@@ -57,6 +57,27 @@ pub fn start_zeno(
 
 #[cfg(test)]
 mod tests {
+    use super::start_zeno;
+    use message::{Message, TestMessage, UnsignedMessage};
+    use signed;
+    use std::collections::HashMap;
     #[test]
-    fn basic() {}
+    fn basic() {
+        let urls = vec!["127.0.0.1:44444".to_string(),
+                        "127.0.0.1:55555".to_string()];
+        let mut pubkeys_to_urls = HashMap::new();
+        let mut pubkeys = Vec::new();
+        let mut zenos = Vec::new();
+        for i in 0..2 {
+            let pubkey = signed::gen_keys().0;
+            println!("URL IS: {:?}", urls[i]);
+            pubkeys.push(pubkey.clone());
+            pubkeys_to_urls.insert(pubkey, urls[i].clone());
+        }
+        for i in 0..2 {
+            zenos.push(
+                start_zeno(urls[i].clone(), pubkeys[i],
+                          pubkeys_to_urls.clone()));
+        }
+    }
 }
