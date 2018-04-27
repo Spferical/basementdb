@@ -5,10 +5,11 @@ use std::vec::Vec;
 use signed::Signed;
 use str_serialize::StrSerialize;
 
+#[allow(dead_code)]
 enum MessageType {
     // 4.4 Sequence Number Assignment
     Request,        // Client Request (Request)
-    OR,             // OrderedRequest (Request)
+    Or,             // OrderedRequest (Request)
     Commit,         // Commit (Request)
     ClientResponse, // Client Response (Response)
     FillHole,       // Fill Hole (Reply, in response to `Commit` or `OR` from server)
@@ -44,7 +45,7 @@ pub struct OrderedRequestMessage {
     pub d_req: HashDigest, // Digest of the current request
     pub i: signed::Public, // Primary public key
     pub s: bool,           // Flag indicating if this is a strong operation
-    pub ND: Vec<u8>,       // ND is a set of non-deterministic application variables
+    pub nd: Vec<u8>,       // nd is a set of non-deterministic application variables
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,7 +53,7 @@ pub struct ClientResponseMessage {
     pub response: ConcreteClientResponseMessage, // The first chunk of the response
     pub j: signed::Public,                       // Replica public key
     pub r: Vec<u8>,                              // Result of the operation performed
-    pub OR: OrderedRequestMessage,               // OrderedRequestMessage
+    pub or: OrderedRequestMessage,               // OrderedRequestMessage
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -73,7 +74,7 @@ pub struct SpecReplyMessage {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CommitMessage {
-    pub OR: OrderedRequestMessage, // OrderedRequestMessage
+    pub or: OrderedRequestMessage, // OrderedRequestMessage
     pub j: signed::Public,         // Replica public key
 }
 
@@ -91,7 +92,7 @@ pub struct ReplyMessage {
 pub struct FillHoleMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
-    pub OR_n: u64,         // OrderedRequestMessage.n
+    pub or_n: u64,         // OrderedRequestMessage.n
     pub i: signed::Public, // Primary public key
 }
 

@@ -15,7 +15,7 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Arc<Zeno>, m: RequestMessage, n: Network) -> Message {
+fn on_request_message(z: Arc<Zeno>, _: RequestMessage, _: Network) -> Message {
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
