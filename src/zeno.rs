@@ -58,7 +58,6 @@ pub fn start_zeno(
 #[cfg(test)]
 mod tests {
     use super::start_zeno;
-    use message::{Message, TestMessage, UnsignedMessage};
     use signed;
     use std::collections::HashMap;
     #[test]
