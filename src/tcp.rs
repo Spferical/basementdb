@@ -266,9 +266,10 @@ impl Network {
         };
     }
 
-    pub fn send_to_all(&mut self, _: Message) -> Result<(), io::Error> {
-        Ok(())
-    }
+    /*pub fn send_to_all(&mut self, _: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        return (*psc).into_iter().map(|(p, v)| ).collect();
+    }*/
 
     pub fn halt(&self) {
         *self.alive_state.lock().unwrap() = false;
@@ -313,12 +314,12 @@ mod tests {
         let mut network1 = Network::new(
             ip1.to_string(),
             signed_ip_map_1,
-            (modify_state, test_state1.clone()),
+            Some((modify_state, test_state1.clone())),
         );
         let mut network2 = Network::new(
             ip2.to_string(),
             signed_ip_map_2,
-            (modify_state, test_state2.clone()),
+            Some((modify_state, test_state2.clone())),
         );
 
         let mut a = 0;
