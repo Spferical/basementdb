@@ -222,7 +222,7 @@ impl Network {
     pub fn new<'a, T: 'static + Send + Clone>(
         my_ip: String,
         public_key_to_ip_map: HashMap<signed::Public, String>,
-        receive_callback: ServerCallback<T>,
+        receive_callback: Option<ServerCallback<T>>,
     ) -> Network {
         let peer_send_clients: HashMap<signed::Public, TCPClient> =
             try_connecting_to_everyone(public_key_to_ip_map);
@@ -239,7 +239,9 @@ impl Network {
         };
         let net1 = net.clone();
 
-        thread::spawn(move || start_server(net1, rx, receive_callback));
+        if receive_callback.is_some() {
+            thread::spawn(move || start_server(net1, rx, receive_callback.unwrap()));
+        }
         thread::spawn(move || retry_dead_connections(psc1, alive1));
 
         return net;
@@ -262,6 +264,10 @@ impl Network {
                 format!("Invalid client... it failed due to: {:?}", e),
             )),
         };
+    }
+
+    pub fn send_to_all(&mut self, _: Message) -> Result<(), io::Error> {
+        Ok(())
     }
 
     pub fn halt(&self) {

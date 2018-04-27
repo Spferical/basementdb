@@ -45,7 +45,11 @@ pub fn start_zeno(
         pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
         state: Arc::new(Mutex::new(ZenoState {})),
     });
-    Network::new(url, pubkeys_to_url, (Zeno::handle_message, zeno.clone()));
+    Network::new(
+        url,
+        pubkeys_to_url,
+        Some((Zeno::handle_message, zeno.clone())),
+    );
     zeno
 }
 
