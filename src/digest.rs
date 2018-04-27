@@ -36,7 +36,7 @@ pub fn d<T: Serialize>(obj: T) -> HashDigest {
 
 #[cfg(test)]
 mod tests {
-    use super::D;
+    use super::d as D;
 
     #[test]
     fn simple_hash_digest() {
