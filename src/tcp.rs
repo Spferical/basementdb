@@ -96,9 +96,10 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
                 let net1 = net.clone();
+                let callback1 = callback.clone();
+                let alive1 = alive.clone();
                 let bufstream = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, stream);
-                thread::spawn(move || handle_reader(net1, bufstream, callback, alive));
-                return;
+                thread::spawn(move || handle_reader(net1, bufstream, callback1, alive1));
             }
         };
 
