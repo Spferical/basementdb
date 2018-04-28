@@ -96,7 +96,8 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
                 let net1 = net.clone();
-                thread::spawn(move || handle_reader(net1, stream, callback, alive));
+                let bufstream = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, stream);
+                thread::spawn(move || handle_reader(net1, bufstream, callback, alive));
                 return;
             }
         };
@@ -115,17 +116,12 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
 
 fn handle_reader<T: Clone>(
     net: Network,
-    client: TcpStream,
+    mut client: BufStream<TcpStream>,
     callback: ServerCallback<T>,
     alive: Arc<Mutex<bool>>,
 ) -> Result<(), io::Error> {
-    client.set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))?;
-    client.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
-
-    let mut bufclient = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, client);
-
     loop {
-        let v = read_string_from_socket(&mut bufclient)?;
+        let v = read_string_from_socket(&mut client)?;
 
         // Lets check if we're still alive...
         {
@@ -138,7 +134,7 @@ fn handle_reader<T: Clone>(
             invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
         match potential_response {
             None => {}
-            Some(resp) => write_string_on_socket(&mut bufclient, Message::str_serialize(&resp)?)?,
+            Some(resp) => write_string_on_socket(&mut client, Message::str_serialize(&resp)?)?,
         };
     }
 }
@@ -146,12 +142,31 @@ fn handle_reader<T: Clone>(
 #[derive(Debug)]
 pub struct TCPClient {
     ip_and_port: String,
-    stream: Result<TcpStream, io::Error>,
+    stream: Option<BufStream<TcpStream>>,
 }
 
 pub fn connect_to_server(ip_and_port: String) -> TCPClient {
     let sock_addr: SocketAddr = ip_and_port.parse().unwrap();
-    let stream = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0));
+    let s = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0));
+    let stream = match s {
+        Ok(tcp_stream) => {
+            tcp_stream
+                .set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))
+                .ok();
+            tcp_stream
+                .set_read_timeout(Some(Duration::new(READ_TIMEOUT, 0)))
+                .ok();
+            Some(BufStream::with_capacities(
+                MAX_BUF_SIZE,
+                MAX_BUF_SIZE,
+                tcp_stream,
+            ))
+        }
+        Err(e) => {
+            eprintln!("Failed to connect to {}: {:?}", ip_and_port, e);
+            None
+        }
+    };
     return TCPClient {
         ip_and_port: ip_and_port,
         stream: stream,
@@ -162,18 +177,7 @@ fn try_connecting_to_everyone(
     h: HashMap<signed::Public, String>,
 ) -> HashMap<signed::Public, TCPClient> {
     h.into_iter()
-        .map(
-            |(p, o): (signed::Public, String)| -> (signed::Public, TCPClient) {
-                let r1 = connect_to_server(o.to_string());
-                match &r1.stream {
-                    Ok(_) => {}
-                    Err(e) => {
-                        eprintln!("Failed to connect to {}: {:?}", o, e);
-                    }
-                };
-                (p, r1)
-            },
-        )
+        .map(|(p, o)| (p, connect_to_server(o.to_string())))
         .collect()
 }
 
@@ -196,7 +200,7 @@ fn retry_dead_connections(
             let conns = &*p.lock().unwrap();
             retries = conns
                 .into_iter()
-                .filter(|(_, v)| v.stream.is_err())
+                .filter(|(_, v)| v.stream.is_none())
                 .map(|(p, v)| (p.clone(), v.ip_and_port.clone()))
                 .collect();
         }
@@ -247,23 +251,35 @@ impl Network {
         return net;
     }
 
-    pub fn send(&mut self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
-        let mut psc = self.peer_send_clients.lock().unwrap();
-        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-
-        return match &client_raw.stream {
-            Ok(stream) => {
+    fn _send(&self, m: Message, client_raw: &mut TCPClient) -> Result<(), io::Error> {
+        match &mut client_raw.stream {
+            Some(stream) => {
                 let s: String = Message::str_serialize(&m)?;
-
-                stream.set_write_timeout(Some(Duration::new(WRITE_TIMEOUT, 0)))?;
 
                 write_string_on_socket(stream, s)
             }
-            Err(e) => Err(io::Error::new(
-                io::ErrorKind::AddrNotAvailable,
-                format!("Invalid client... it failed due to: {:?}", e),
-            )),
-        };
+            _ => Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected")),
+        }
+    }
+
+    fn _recv(&self, client_raw: &mut TCPClient) -> Result<Message, io::Error> {
+        match &mut client_raw.stream.as_mut() {
+            Some(stream) => Message::str_deserialize(&read_string_from_socket(stream)?),
+            _ => Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected")),
+        }
+    }
+
+    pub fn send_recv(&self, m: Message, recipient: signed::Public) -> Result<Message, io::Error> {
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
+        self._send(m, client_raw)?;
+        self._recv(client_raw)
+    }
+
+    pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
+        self._send(m, client_raw)
     }
 
     pub fn send_to_all(&mut self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
@@ -314,12 +330,12 @@ mod tests {
         signed_ip_map_1.insert(public2, ip2.clone().to_string());
         signed_ip_map_2.insert(public1, ip1.clone().to_string());
 
-        let mut network1 = Network::new(
+        let network1 = Network::new(
             ip1.to_string(),
             signed_ip_map_1,
             Some((modify_state, test_state1.clone())),
         );
-        let mut network2 = Network::new(
+        let network2 = Network::new(
             ip2.to_string(),
             signed_ip_map_2,
             Some((modify_state, test_state2.clone())),
