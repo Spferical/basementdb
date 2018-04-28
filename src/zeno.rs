@@ -61,6 +61,10 @@ mod tests {
     use signed;
     use std::collections::HashMap;
     use zeno_client;
+    use std::thread;
+    use std::sync::mpsc;
+    use std::time;
+
     #[test]
     fn basic() {
         let urls = vec!["127.0.0.1:44444".to_string(),
@@ -79,8 +83,14 @@ mod tests {
                 start_zeno(urls[i].clone(), pubkeys[i],
                           pubkeys_to_urls.clone()));
         }
-        let mut c = zeno_client::Client::new(
-            signed::gen_keys(), pubkeys_to_urls.clone());
-        c.request(vec![], false);
+        let (tx, rx) = mpsc::channel();
+        let t = thread::spawn(move || {
+            let mut c = zeno_client::Client::new(
+                signed::gen_keys(), pubkeys_to_urls.clone());
+            c.request(vec![], false);
+            tx.send(()).unwrap();
+        });
+        assert_eq!(rx.recv_timeout(time::Duration::from_secs(1)), Ok(()));
+        t.join().unwrap();
     }
 }
