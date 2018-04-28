@@ -16,3 +16,4 @@ pub mod signed;
 pub mod str_serialize;
 pub mod tcp;
 pub mod zeno;
+pub mod zeno_client;

@@ -168,7 +168,7 @@ fn try_connecting_to_everyone(
                 match &r1.stream {
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("Tried to connect, but failed due to: {:?}", e);
+                        eprintln!("Failed to connect to {}: {:?}", o, e);
                     }
                 };
                 (p, r1)
@@ -268,13 +268,11 @@ impl Network {
 
     pub fn send_to_all(&mut self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
         let psc = self.peer_send_clients.lock().unwrap();
-
-        return (psc)
+        return psc
             .iter()
             .filter(|(_, v)| self.my_ip_and_port != v.ip_and_port)
             .map(|(&p, _)| {
-                let new_self: &mut Network = &mut (self.clone());
-                (p, new_self.send(m.clone(), p))
+                (p, self.clone().send(m.clone(), p))
             })
             .collect();
     }

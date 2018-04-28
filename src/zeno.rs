@@ -60,6 +60,7 @@ mod tests {
     use super::start_zeno;
     use signed;
     use std::collections::HashMap;
+    use zeno_client;
     #[test]
     fn basic() {
         let urls = vec!["127.0.0.1:44444".to_string(),
@@ -78,5 +79,8 @@ mod tests {
                 start_zeno(urls[i].clone(), pubkeys[i],
                           pubkeys_to_urls.clone()));
         }
+        let mut c = zeno_client::Client::new(
+            signed::gen_keys(), pubkeys_to_urls.clone());
+        c.request(vec![], false);
     }
 }
