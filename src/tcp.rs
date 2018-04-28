@@ -269,9 +269,9 @@ impl Network {
     pub fn send_to_all(&mut self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
         let psc = self.peer_send_clients.lock().unwrap();
 
-        return (&*psc)
-            .into_iter()
-            .filter(|(_, &v)| self.my_ip_and_port != v.ip_and_port)
+        return (psc)
+            .iter()
+            .filter(|(_, v)| self.my_ip_and_port != v.ip_and_port)
             .map(|(&p, _)| {
                 let new_self: &mut Network = &mut (self.clone());
                 (p, new_self.send(m.clone(), p))
