@@ -127,7 +127,6 @@ mod tests {
         let mut zenos = Vec::new();
         for i in 0..2 {
             let pubkey = signed::gen_keys().0;
-            println!("URL IS: {:?}", urls[i]);
             pubkeys.push(pubkey.clone());
             pubkeys_to_urls.insert(pubkey, urls[i].clone());
         }

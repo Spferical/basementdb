@@ -48,13 +48,10 @@ impl Client {
             let rec1 = rec.clone();
             let done1 = done.clone();
             thread::spawn(move || loop {
-                println!("Trying request...");
                 if let Ok(reply) = net.send_recv(m1.clone(), rec1) {
-                    println!("Request success! {:?}", reply);
                     tx1.send((rec1, reply)).ok();
                     break;
                 } else if *done1.lock().unwrap() {
-                    println!("Done!");
                     break;
                 }
                 thread::sleep(time::Duration::from_millis(100));
@@ -67,10 +64,9 @@ impl Client {
             *num += 1;
             if *num > 0 {
                 *done.lock().unwrap() = true;
-                println!("All done!");
                 return;
             }
         }
-        panic!("Channel closed!");
+        unreachable!();
     }
 }
