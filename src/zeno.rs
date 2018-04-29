@@ -33,12 +33,23 @@ pub struct Zeno {
 }
 
 fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
-    let zs: &ZenoState = &*z.state.lock().unwrap();
+    let zs: &mut ZenoState = &mut *z.state.lock().unwrap();
 
-    let last_req_option = zs.requests[&m.c].last();
-    let last_req = last_req_option.unwrap();
+    let last_t: i64;
 
-    if last_req.base.t == m.t - 1 {}
+    if !zs.requests.contains_key(&m.c) {
+        zs.requests.insert(m.c, Vec::new());
+    }
+
+    if zs.requests[&m.c].len() > 0 {
+        let last_req_option = zs.requests[&m.c].last();
+        let last_req = last_req_option.unwrap();
+        last_t = last_req.base.t as i64;
+    } else {
+        last_t = -1;
+    }
+
+    if last_t == m.t as i64 - 1 {}
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
@@ -61,7 +72,10 @@ impl Zeno {
         match m {
             Message::Unsigned(um) => Zeno::match_unsigned_message(z, um, n),
             Message::Signed(sm) => match Zeno::verifier(sm) {
-                None => None,
+                None => {
+                    println!("Unable to verify message!");
+                    None
+                }
                 Some(u) => Zeno::match_unsigned_message(z, u, n),
             },
         }
@@ -80,11 +94,8 @@ pub fn start_zeno(
             n: -1,
             v: 0,
             h_n: HashChain::new(),
-            requests: pubkeys_to_url
-                .keys()
-                .map(|p| (p.clone(), Vec::new()))
-                .collect(),
-            replies: pubkeys_to_url.keys().map(|p| (p.clone(), None)).collect(),
+            requests: HashMap::new(),
+            replies: HashMap::new(),
             status: ZenoStatus::Replica,
         })),
     };
