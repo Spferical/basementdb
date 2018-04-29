@@ -2,12 +2,21 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use message::{Message, RequestMessage, TestMessage, UnsignedMessage};
+use digest::{HashChain, HashDigest};
+use message::{ClientResponseMessage, Message, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
+use signed::Signed;
 use tcp::Network;
 
 struct ZenoState {
     pubkeys: Vec<signed::Public>,
+
+    // See 4.3
+    n: u64,
+    v: u64,
+    h_n: HashChain,
+    requests: HashMap<signed::Public, Vec<Signed<Message>>>,
+    replies: Option<Signed<Message>>,
 }
 
 #[derive(Clone)]
@@ -60,15 +69,14 @@ mod tests {
     use super::start_zeno;
     use signed;
     use std::collections::HashMap;
-    use zeno_client;
-    use std::thread;
     use std::sync::mpsc;
+    use std::thread;
     use std::time;
+    use zeno_client;
 
     #[test]
     fn basic() {
-        let urls = vec!["127.0.0.1:44444".to_string(),
-                        "127.0.0.1:55555".to_string()];
+        let urls = vec!["127.0.0.1:44444".to_string(), "127.0.0.1:55555".to_string()];
         let mut pubkeys_to_urls = HashMap::new();
         let mut pubkeys = Vec::new();
         let mut zenos = Vec::new();
@@ -79,14 +87,15 @@ mod tests {
             pubkeys_to_urls.insert(pubkey, urls[i].clone());
         }
         for i in 0..2 {
-            zenos.push(
-                start_zeno(urls[i].clone(), pubkeys[i],
-                          pubkeys_to_urls.clone()));
+            zenos.push(start_zeno(
+                urls[i].clone(),
+                pubkeys[i],
+                pubkeys_to_urls.clone(),
+            ));
         }
         let (tx, rx) = mpsc::channel();
         let t = thread::spawn(move || {
-            let mut c = zeno_client::Client::new(
-                signed::gen_keys(), pubkeys_to_urls.clone());
+            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone());
             c.request(vec![], false);
             tx.send(()).unwrap();
         });
