@@ -23,5 +23,4 @@ fn main() {
 
     // TODO: read private and public key from path in config
     // and start the server
-
 }

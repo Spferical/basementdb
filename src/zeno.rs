@@ -125,16 +125,22 @@ mod tests {
 
     #[test]
     fn basic() {
-        let urls = vec!["127.0.0.1:44444".to_string(), "127.0.0.1:55555".to_string()];
+        let urls = vec![
+            "127.0.0.1:44441".to_string(),
+            "127.0.0.1:44442".to_string(),
+            "127.0.0.1:44443".to_string(),
+            "127.0.0.1:44444".to_string(),
+        ];
         let mut pubkeys_to_urls = HashMap::new();
         let mut pubkeys = Vec::new();
         let mut zenos = Vec::new();
-        for i in 0..2 {
+        for i in 0..4 {
             let pubkey = signed::gen_keys().0;
             pubkeys.push(pubkey.clone());
             pubkeys_to_urls.insert(pubkey, urls[i].clone());
         }
-        for i in 0..2 {
+
+        for i in 0..4 {
             zenos.push(start_zeno(
                 urls[i].clone(),
                 pubkeys[i],
