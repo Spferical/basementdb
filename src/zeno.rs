@@ -9,8 +9,8 @@ use signed::Signed;
 use tcp::Network;
 
 enum ZenoStatus {
-    REPLICA,
-    PRIMARY,
+    Replica,
+    Primary,
 }
 
 struct ZenoState {
@@ -61,6 +61,15 @@ pub fn start_zeno(
         me: pubkey,
         state: Arc::new(Mutex::new(ZenoState {
             pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
+            n: 0,
+            v: 0,
+            h_n: HashChain::new(),
+            requests: pubkeys_to_url
+                .keys()
+                .map(|p| (p.clone(), Vec::new()))
+                .collect(),
+            replies: pubkeys_to_url.keys().map(|p| (p.clone(), None)).collect(),
+            status: ZenoStatus::Replica,
         })),
     };
     Network::new(
