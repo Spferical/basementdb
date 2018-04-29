@@ -20,8 +20,8 @@ struct ZenoState {
     n: i64,
     v: i64,
     h_n: HashChain,
-    requests: HashMap<signed::Public, Vec<Signed<Message>>>,
-    replies: HashMap<signed::Public, Option<Signed<Message>>>,
+    requests: HashMap<signed::Public, Vec<Signed<RequestMessage>>>,
+    replies: HashMap<signed::Public, Option<UnsignedMessage>>,
 
     status: ZenoStatus,
 }
@@ -32,11 +32,24 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Zeno, _: RequestMessage, _: Network) -> Message {
+fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
+    let zs: &ZenoState = &*z.state.lock().unwrap();
+
+    let last_req_option = zs.requests[&m.c].last();
+    let last_req = last_req_option.unwrap();
+
+    if last_req.base.t == m.t - 1 {}
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
 impl Zeno {
+    fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
+        match m.clone().base {
+            UnsignedMessage::Request(rm) => m.verify(&rm.c),
+            _ => None,
+        }
+    }
+
     fn match_unsigned_message(z: Zeno, m: UnsignedMessage, n: Network) -> Option<Message> {
         match m {
             UnsignedMessage::Request(rm) => Some(on_request_message(z, rm, n)),
@@ -47,7 +60,10 @@ impl Zeno {
     fn handle_message(z: Zeno, m: Message, n: Network) -> Option<Message> {
         match m {
             Message::Unsigned(um) => Zeno::match_unsigned_message(z, um, n),
-            Message::Signed(sm) => Zeno::match_unsigned_message(z, sm.base, n),
+            Message::Signed(sm) => match Zeno::verifier(sm) {
+                None => None,
+                Some(u) => Zeno::match_unsigned_message(z, u, n),
+            },
         }
     }
 }
