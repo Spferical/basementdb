@@ -16,7 +16,7 @@ struct ZenoState {
     v: u64,
     h_n: HashChain,
     requests: HashMap<signed::Public, Vec<Signed<Message>>>,
-    replies: Option<Signed<Message>>,
+    replies: HashMap<signed::Public, Option<Signed<Message>>>,
 }
 
 #[derive(Clone)]
