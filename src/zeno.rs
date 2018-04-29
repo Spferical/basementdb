@@ -34,7 +34,7 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
+fn on_request_message(z: Zeno, m: RequestMessage, n: Network) -> Message {
     let zs: &mut ZenoState = &mut *z.state.lock().unwrap();
 
     let last_t: i64;
@@ -92,7 +92,11 @@ pub fn start_zeno(
     let zeno = Zeno {
         me: pubkey,
         state: Arc::new(Mutex::new(ZenoState {
-            pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
+            pubkeys: pubkeys_to_url
+                .keys()
+                .filter(|&&p| p != pubkey)
+                .map(|p| p.clone())
+                .collect(),
             n: -1,
             v: 0,
             h_n: HashChain::new(),
