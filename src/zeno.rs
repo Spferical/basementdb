@@ -8,6 +8,11 @@ use signed;
 use signed::Signed;
 use tcp::Network;
 
+enum ZenoStatus {
+    REPLICA,
+    PRIMARY,
+}
+
 struct ZenoState {
     pubkeys: Vec<signed::Public>,
 
@@ -17,6 +22,8 @@ struct ZenoState {
     h_n: HashChain,
     requests: HashMap<signed::Public, Vec<Signed<Message>>>,
     replies: HashMap<signed::Public, Option<Signed<Message>>>,
+
+    status: ZenoStatus,
 }
 
 #[derive(Clone)]
