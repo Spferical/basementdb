@@ -22,8 +22,10 @@ struct ZenoState {
     n: i64,
     v: i64,
     h_n: HashChain,
-    requests: HashMap<signed::Public, Vec<Signed<RequestMessage>>>,
+    requests: HashMap<signed::Public, Vec<usize>>,
     replies: HashMap<signed::Public, Option<UnsignedMessage>>,
+
+    all_requests: Vec<Signed<RequestMessage>>,
 
     status: ZenoStatus,
 }
@@ -34,7 +36,7 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Zeno, m: RequestMessage, n: Network) -> Message {
+fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
     let zs: &mut ZenoState = &mut *z.state.lock().unwrap();
 
     let last_t: i64;
@@ -46,7 +48,7 @@ fn on_request_message(z: Zeno, m: RequestMessage, n: Network) -> Message {
     if zs.requests[&m.c].len() > 0 {
         let last_req_option = zs.requests[&m.c].last();
         let last_req = last_req_option.unwrap();
-        last_t = last_req.base.t as i64;
+        last_t = zs.all_requests[*last_req].base.t as i64;
     } else {
         last_t = -1;
     }
@@ -63,22 +65,22 @@ impl Zeno {
         }
     }
 
-    fn match_unsigned_message(z: Zeno, m: UnsignedMessage, n: Network) -> Option<Message> {
+    fn match_unsigned_message(self, m: UnsignedMessage, n: Network) -> Option<Message> {
         match m {
-            UnsignedMessage::Request(rm) => Some(on_request_message(z, rm, n)),
+            UnsignedMessage::Request(rm) => Some(on_request_message(self, rm, n)),
             _ => None,
         }
     }
 
-    fn handle_message(z: Zeno, m: Message, n: Network) -> Option<Message> {
+    fn handle_message(self, m: Message, n: Network) -> Option<Message> {
         match m {
-            Message::Unsigned(um) => Zeno::match_unsigned_message(z, um, n),
+            Message::Unsigned(um) => self.match_unsigned_message(um, n),
             Message::Signed(sm) => match Zeno::verifier(sm) {
                 None => {
                     println!("Unable to verify message!");
                     None
                 }
-                Some(u) => Zeno::match_unsigned_message(z, u, n),
+                Some(u) => self.match_unsigned_message(u, n),
             },
         }
     }
@@ -103,6 +105,7 @@ pub fn start_zeno(
             requests: HashMap::new(),
             replies: HashMap::new(),
             status: ZenoStatus::Replica,
+            all_requests: Vec::new(),
         })),
     };
     Network::new(
