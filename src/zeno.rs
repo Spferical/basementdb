@@ -2,17 +2,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use digest::{HashChain, HashDigest};
-use message::{ClientResponseMessage, Message, RequestMessage, TestMessage, UnsignedMessage};
+use digest::HashChain;
+use message::{Message, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
 
+#[allow(dead_code)]
 enum ZenoStatus {
     Replica,
     Primary,
 }
 
+#[allow(dead_code)]
 struct ZenoState {
     pubkeys: Vec<signed::Public>,
 
