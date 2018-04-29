@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use digest;
 use digest::HashChain;
-use message::{Message, RequestMessage, TestMessage, UnsignedMessage};
+use message::{Message, OrderedRequestMessage, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -21,11 +22,11 @@ struct ZenoState {
     // See 4.3
     n: i64,
     v: i64,
-    h_n: HashChain,
+    h: HashChain,
     requests: HashMap<signed::Public, Vec<usize>>,
     replies: HashMap<signed::Public, Option<UnsignedMessage>>,
 
-    all_requests: Vec<Signed<RequestMessage>>,
+    all_requests: Vec<RequestMessage>,
 
     status: ZenoStatus,
 }
@@ -33,10 +34,11 @@ struct ZenoState {
 #[derive(Clone)]
 pub struct Zeno {
     me: signed::Public,
+    private_me: signed::Private,
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
+fn on_request_message(z: Zeno, m: RequestMessage, n: Network) -> Message {
     let zs: &mut ZenoState = &mut *z.state.lock().unwrap();
 
     let last_t: i64;
@@ -48,12 +50,39 @@ fn on_request_message(z: Zeno, m: RequestMessage, _: Network) -> Message {
     if zs.requests[&m.c].len() > 0 {
         let last_req_option = zs.requests[&m.c].last();
         let last_req = last_req_option.unwrap();
-        last_t = zs.all_requests[*last_req].base.t as i64;
+        last_t = zs.all_requests[*last_req].t as i64;
     } else {
         last_t = -1;
     }
 
-    if last_t == m.t as i64 - 1 {}
+    if last_t == m.t as i64 - 1 {
+        assert!(zs.all_requests.len() == (zs.n + 1) as usize);
+        zs.all_requests.push(m.clone());
+        zs.requests.get_mut(&m.c).unwrap().push(zs.n as usize);
+        zs.n += 1;
+
+        let d_req = digest::d(m.clone());
+        let h_n = match zs.h.last() {
+            None => d_req,
+            Some(h_n_minus_1) => digest::d((h_n_minus_1, d_req)),
+        };
+        zs.h.push(h_n);
+
+        let od = OrderedRequestMessage {
+            v: zs.v as u64,
+            n: zs.n as u64,
+            h: h_n,
+            d_req: d_req,
+            i: z.me,
+            s: m.s,
+            nd: Vec::new(),
+        };
+
+        n.send_to_all(Message::Signed(Signed::new(
+            UnsignedMessage::OrderedRequest(od),
+            &z.private_me,
+        )));
+    }
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
@@ -88,20 +117,21 @@ impl Zeno {
 
 pub fn start_zeno(
     url: String,
-    pubkey: signed::Public,
+    kp: signed::KeyPair,
     pubkeys_to_url: HashMap<signed::Public, String>,
 ) -> Zeno {
     let zeno = Zeno {
-        me: pubkey,
+        me: kp.clone().0,
+        private_me: kp.clone().1,
         state: Arc::new(Mutex::new(ZenoState {
             pubkeys: pubkeys_to_url
                 .keys()
-                .filter(|&&p| p != pubkey)
+                .filter(|&&p| p != kp.0)
                 .map(|p| p.clone())
                 .collect(),
             n: -1,
             v: 0,
-            h_n: HashChain::new(),
+            h: Vec::new(),
             requests: HashMap::new(),
             replies: HashMap::new(),
             status: ZenoStatus::Replica,
@@ -135,18 +165,18 @@ mod tests {
             "127.0.0.1:44444".to_string(),
         ];
         let mut pubkeys_to_urls = HashMap::new();
-        let mut pubkeys = Vec::new();
+        let mut keypairs: Vec<signed::KeyPair> = Vec::new();
         let mut zenos = Vec::new();
         for i in 0..4 {
-            let pubkey = signed::gen_keys().0;
-            pubkeys.push(pubkey.clone());
-            pubkeys_to_urls.insert(pubkey, urls[i].clone());
+            let kp = signed::gen_keys();
+            keypairs.push(kp.clone());
+            pubkeys_to_urls.insert(kp.0, urls[i].clone());
         }
 
         for i in 0..4 {
             zenos.push(start_zeno(
                 urls[i].clone(),
-                pubkeys[i],
+                keypairs[i].clone(),
                 pubkeys_to_urls.clone(),
             ));
         }
