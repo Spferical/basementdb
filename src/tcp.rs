@@ -283,7 +283,7 @@ impl Network {
         self._send(m, client_raw)
     }
 
-    pub fn send_to_all(&mut self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
+    pub fn send_to_all(&self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
         let psc = self.peer_send_clients.lock().unwrap();
         return psc.iter()
             .filter(|(_, v)| self.my_ip_and_port != v.ip_and_port)
