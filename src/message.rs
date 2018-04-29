@@ -1,4 +1,4 @@
-use digest::{HashChain, HashDigest};
+use digest::HashDigest;
 use signed;
 use std::vec::Vec;
 
@@ -41,7 +41,7 @@ pub struct RequestMessage {
 pub struct OrderedRequestMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
-    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub h: HashDigest,     // History, a hash-chain digest of the requests
     pub d_req: HashDigest, // Digest of the current request
     pub i: signed::Public, // Primary public key
     pub s: bool,           // Flag indicating if this is a strong operation
@@ -66,7 +66,7 @@ pub enum ConcreteClientResponseMessage {
 pub struct SpecReplyMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
-    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub h: HashDigest,     // History, a hash-chain digest of the requests
     pub d_r: HashDigest,   // Digest of the result `r`
     pub c: signed::Public, // Client public key
     pub t: u64,            // Timestamp assigned by the client to each request
@@ -82,7 +82,7 @@ pub struct CommitMessage {
 pub struct ReplyMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
-    pub h: HashChain,      // History, a hash-chain digest of the requests
+    pub h: HashDigest,     // History, a hash-chain digest of the requests
     pub d_r: HashDigest,   // Digest of the result `r`
     pub c: signed::Public, // Client public key
     pub t: u64,            // Timestamp assigned by the client to each request
