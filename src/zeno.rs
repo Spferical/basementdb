@@ -17,8 +17,8 @@ struct ZenoState {
     pubkeys: Vec<signed::Public>,
 
     // See 4.3
-    n: u64,
-    v: u64,
+    n: i64,
+    v: i64,
     h_n: HashChain,
     requests: HashMap<signed::Public, Vec<Signed<Message>>>,
     replies: HashMap<signed::Public, Option<Signed<Message>>>,
@@ -61,7 +61,7 @@ pub fn start_zeno(
         me: pubkey,
         state: Arc::new(Mutex::new(ZenoState {
             pubkeys: pubkeys_to_url.keys().map(|p| p.clone()).collect(),
-            n: 0,
+            n: -1,
             v: 0,
             h_n: HashChain::new(),
             requests: pubkeys_to_url
