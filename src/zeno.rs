@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use digest;
-use digest::HashChain;
-use message::{Message, OrderedRequestMessage, RequestMessage, TestMessage, UnsignedMessage};
+use digest::{HashChain, HashDigest};
+use message::{ClientResponseMessage, Message, OrderedRequestMessage, RequestMessage, TestMessage,
+              UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -27,6 +28,10 @@ struct ZenoState {
     replies: HashMap<signed::Public, Option<UnsignedMessage>>,
 
     all_requests: Vec<RequestMessage>,
+
+    reqs_without_or: HashMap<HashDigest, RequestMessage>,
+    //TODO: handle case of getting req after or
+    ors_without_req: Vec<OrderedRequestMessage>,
 
     status: ZenoStatus,
 }
@@ -86,6 +91,51 @@ fn on_request_message(z: Zeno, m: RequestMessage, n: Network) -> Message {
     return Message::Unsigned(UnsignedMessage::Test(TestMessage { c: z.me }));
 }
 
+/// As a replica, process the given request.
+/// This handles everything replica-side described in Zeno section 4.4.
+///
+/// Returns a message to be sent to the client.
+fn process_request(
+    z: Zeno,
+    om: OrderedRequestMessage,
+    msg: RequestMessage,
+    _net: Network,
+) -> Option<ClientResponseMessage> {
+    {
+        let zs = z.state.lock().unwrap();
+        // check valid view
+        if om.v != 0 {
+            return None;
+        }
+        // check valid sequence number
+        if om.n as i64 > zs.n + 1 {
+            unimplemented!("got sequence numbers out-of-order");
+        }
+        // check history digest
+        let m_digest = digest::d(msg);
+        let history_digest = digest::d((zs.h.clone(), m_digest));
+        if history_digest != om.h {
+            unimplemented!("History digests don't match");
+        }
+    }
+
+    None
+}
+
+fn on_ordered_request(z: Zeno, om: OrderedRequestMessage, net: Network) {
+    let req_opt = {
+        let zs = &mut *z.state.lock().unwrap();
+        zs.reqs_without_or.remove(&om.d_req)
+    };
+    match req_opt {
+        Some(req) => {
+            println!("{:?}", req);
+            process_request(z, om, req, net);
+        }
+        None => {}
+    }
+}
+
 impl Zeno {
     fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
         match m.clone().base {
@@ -97,6 +147,10 @@ impl Zeno {
     fn match_unsigned_message(self, m: UnsignedMessage, n: Network) -> Option<Message> {
         match m {
             UnsignedMessage::Request(rm) => Some(on_request_message(self, rm, n)),
+            UnsignedMessage::OrderedRequest(orm) => {
+                on_ordered_request(self, orm, n);
+                None
+            }
             _ => None,
         }
     }
@@ -136,6 +190,8 @@ pub fn start_zeno(
             replies: HashMap::new(),
             status: ZenoStatus::Replica,
             all_requests: Vec::new(),
+            reqs_without_or: HashMap::new(),
+            ors_without_req: Vec::new(),
         })),
     };
     Network::new(
