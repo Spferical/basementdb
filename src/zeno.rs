@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc;
 
 use digest;
 use digest::{HashChain, HashDigest};
+use message;
 use message::{ClientResponseMessage, Message, OrderedRequestMessage, RequestMessage, TestMessage,
-              UnsignedMessage};
+              UnsignedMessage, ConcreteClientResponseMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -39,7 +41,7 @@ struct ZenoState {
     ors_without_req: Vec<OrderedRequestMessage>,
 
     status: ZenoStatus,
-    apply_tx: Sender<ApplyMsg>,
+    apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 }
 
 #[derive(Clone)]
@@ -107,10 +109,11 @@ fn process_request(
     msg: RequestMessage,
     _net: Network,
 ) -> Option<ClientResponseMessage> {
+    let rx: Receiver<Vec<u8>>;
     {
-        let zs = z.state.lock().unwrap();
+        let mut zs = z.state.lock().unwrap();
         // check valid view
-        if om.v != 0 {
+        if om.v != zs.v as u64 {
             return None;
         }
         // check valid sequence number
@@ -118,14 +121,47 @@ fn process_request(
             unimplemented!("got sequence numbers out-of-order");
         }
         // check history digest
-        let m_digest = digest::d(msg);
+        let m_digest = digest::d(msg.clone());
         let history_digest = digest::d((zs.h.clone(), m_digest));
         if history_digest != om.h {
             unimplemented!("History digests don't match");
         }
-    }
 
-    None
+	let (tx, rx1) = mpsc::channel();
+	rx = rx1;
+        zs.apply_tx.send((ApplyMsg::Apply(msg.o), tx)).unwrap();
+        zs.n += 1;
+        zs.h.push(history_digest);
+    }
+    let app_response = rx.recv().unwrap();
+    {
+        let zs = z.state.lock().unwrap();
+        if !msg.s {
+            return Some(
+                ClientResponseMessage {
+                    response: ConcreteClientResponseMessage::SpecReply(
+                        Signed::new(
+                            message::SpecReplyMessage {
+                                v: zs.v as u64,
+                                n: zs.n as u64,
+                                h: om.h,
+                                d_r: digest::d(app_response.clone()),
+                                c: msg.c,
+                                t: msg.t,
+                            },
+                            &z.private_me,
+                        )
+                    ),
+                    j: z.me,
+                    r: app_response,
+                    or: om,
+                }
+            );
+
+        } else {
+            unimplemented!("Strong request");
+        }
+    }
 }
 
 fn on_ordered_request(z: Zeno, om: OrderedRequestMessage, net: Network) {
@@ -179,7 +215,7 @@ pub fn start_zeno(
     url: String,
     kp: signed::KeyPair,
     pubkeys_to_url: HashMap<signed::Public, String>,
-    apply_tx: Sender<ApplyMsg>,
+    apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 ) -> Zeno {
     let zeno = Zeno {
         me: kp.clone().0,
