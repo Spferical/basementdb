@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
-use message::{ClientResponseMessage, Message, OrderedRequestMessage, RequestMessage, TestMessage,
-              UnsignedMessage, ConcreteClientResponseMessage};
+use message::{ClientResponseMessage, ConcreteClientResponseMessage, Message,
+              OrderedRequestMessage, RequestMessage, TestMessage, UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -127,8 +127,8 @@ fn process_request(
             unimplemented!("History digests don't match");
         }
 
-	let (tx, rx1) = mpsc::channel();
-	rx = rx1;
+        let (tx, rx1) = mpsc::channel();
+        rx = rx1;
         zs.apply_tx.send((ApplyMsg::Apply(msg.o), tx)).unwrap();
         zs.n += 1;
         zs.h.push(history_digest);
@@ -137,27 +137,22 @@ fn process_request(
     {
         let zs = z.state.lock().unwrap();
         if !msg.s {
-            return Some(
-                ClientResponseMessage {
-                    response: ConcreteClientResponseMessage::SpecReply(
-                        Signed::new(
-                            message::SpecReplyMessage {
-                                v: zs.v as u64,
-                                n: zs.n as u64,
-                                h: om.h,
-                                d_r: digest::d(app_response.clone()),
-                                c: msg.c,
-                                t: msg.t,
-                            },
-                            &z.private_me,
-                        )
-                    ),
-                    j: z.me,
-                    r: app_response,
-                    or: om,
-                }
-            );
-
+            return Some(ClientResponseMessage {
+                response: ConcreteClientResponseMessage::SpecReply(Signed::new(
+                    message::SpecReplyMessage {
+                        v: zs.v as u64,
+                        n: zs.n as u64,
+                        h: om.h,
+                        d_r: digest::d(app_response.clone()),
+                        c: msg.c,
+                        t: msg.t,
+                    },
+                    &z.private_me,
+                )),
+                j: z.me,
+                r: app_response,
+                or: om,
+            });
         } else {
             unimplemented!("Strong request");
         }
