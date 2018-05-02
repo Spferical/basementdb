@@ -386,11 +386,9 @@ mod tests {
         let mut b = 0;
 
         while a < 20 {
-            if network1
-                .send(
-                    Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public1 })),
-                    public2,
-                )
+            if network1.send_to_all(Message::Unsigned(UnsignedMessage::Test(TestMessage {
+                c: public1,
+            })))[&public2]
                 .is_ok()
             {
                 a += 1;
@@ -398,11 +396,9 @@ mod tests {
         }
 
         while b < 20 {
-            if network2
-                .send(
-                    Message::Unsigned(UnsignedMessage::Test(TestMessage { c: public2 })),
-                    public1,
-                )
+            if network2.send_to_all(Message::Unsigned(UnsignedMessage::Test(TestMessage {
+                c: public2,
+            })))[&public1]
                 .is_ok()
             {
                 b += 1;
