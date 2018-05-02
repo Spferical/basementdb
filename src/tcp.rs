@@ -16,6 +16,8 @@ use message::Message;
 use signed;
 use str_serialize::StrSerialize;
 
+use scoped_threadpool::Pool;
+
 const MAX_BUF_SIZE: usize = 1048576;
 const READ_TIMEOUT: u64 = 30;
 const WRITE_TIMEOUT: u64 = 30;
@@ -252,7 +254,7 @@ impl Network {
         return net;
     }
 
-    fn _send(&self, m: Message, client_raw: &mut TCPClient) -> Result<(), io::Error> {
+    fn _send(m: Message, client_raw: &mut TCPClient) -> Result<(), io::Error> {
         match &mut client_raw.stream {
             Some(stream) => {
                 let s: String = Message::str_serialize(&m)?;
@@ -263,7 +265,7 @@ impl Network {
         }
     }
 
-    fn _recv(&self, client_raw: &mut TCPClient) -> Result<Message, io::Error> {
+    fn _recv(client_raw: &mut TCPClient) -> Result<Message, io::Error> {
         match &mut client_raw.stream.as_mut() {
             Some(stream) => Message::str_deserialize(&read_string_from_socket(stream)?),
             _ => Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected")),
@@ -273,22 +275,60 @@ impl Network {
     pub fn send_recv(&self, m: Message, recipient: signed::Public) -> Result<Message, io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        self._send(m, client_raw)?;
-        self._recv(client_raw)
+        Network::_send(m, client_raw)?;
+        Network::_recv(client_raw)
     }
 
     pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        self._send(m, client_raw)
+        Network::_send(m, client_raw)
     }
 
     pub fn send_to_all(&self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
-        let psc = self.peer_send_clients.lock().unwrap();
+        /*let mut psc = self.peer_send_clients.lock().unwrap();
         return psc.iter()
             .filter(|(_, v)| self.my_ip_and_port != v.ip_and_port)
-            .map(|(&p, _)| (p, self.clone().send(m.clone(), p)))
-            .collect();
+            .map(|(&p, v)| {
+                let m1 = m.clone();
+                (p, thread::spawn(|| Network::_send(m1, &mut v)))
+            })
+            .map(|(p, v)| (p, v.join().unwrap()))
+            .collect();*/
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        let mut results = HashMap::new();
+        let (tx, rx): (
+            Sender<(signed::Public, Result<(), io::Error>)>,
+            Receiver<(signed::Public, Result<(), io::Error>)>,
+        ) = mpsc::channel();
+
+        // We need to be convinced that our operations on psc's TCPClients
+        // will not outlive psc's current binding. scoped_threadpool helps
+        // with that.
+        let mut pool = Pool::new(psc.len() as u32);
+        pool.scoped(|scoped| {
+            for kv in &mut *psc {
+                let (&pub_key, tcp_client) = kv;
+                if self.my_ip_and_port != tcp_client.ip_and_port {
+                    let m1 = m.clone();
+                    let tx1 = tx.clone();
+
+                    // Send on this channel to signify that the operation is over.
+                    // We can't just mutate results directly because that would mean
+                    // multiple mutable borrows.
+                    scoped.execute(move || {
+                        tx1.send((pub_key, Network::_send(m1, tcp_client))).unwrap();
+                    });
+                }
+            }
+        });
+
+        // Wait for every TCPClient to send a message to everyone
+        for msg in rx.recv() {
+            results.insert(msg.0, msg.1);
+        }
+
+        return results;
     }
 
     pub fn halt(&self) {

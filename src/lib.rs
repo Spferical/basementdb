@@ -10,6 +10,8 @@ extern crate serde_derive;
 
 extern crate sodiumoxide;
 
+extern crate scoped_threadpool;
+
 pub mod digest;
 pub mod message;
 pub mod signed;
