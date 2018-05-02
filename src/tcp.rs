@@ -359,8 +359,8 @@ mod tests {
         let test_state1 = Arc::new(Mutex::new(TestState { state: 0 }));
         let test_state2 = Arc::new(Mutex::new(TestState { state: 0 }));
 
-        let (public1, private1) = signed::gen_keys();
-        let (public2, private2) = signed::gen_keys();
+        let (public1, _) = signed::gen_keys();
+        let (public2, _) = signed::gen_keys();
 
         let ip1 = "127.0.0.1:54321";
         let ip2 = "127.0.0.1:54320";
