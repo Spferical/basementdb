@@ -88,6 +88,7 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
     receiver: Receiver<TCPServerCommand>,
     callback: ServerCallback<T>,
 ) {
+    println!("Server running at {}", net.my_ip_and_port);
     let ip_and_port = net.my_ip_and_port.clone();
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
@@ -247,6 +248,7 @@ impl Network {
         let net1 = net.clone();
 
         if receive_callback.is_some() {
+            println!("{}: Starting server!", net1.my_ip_and_port.clone());
             thread::spawn(move || start_server(net1, rx, receive_callback.unwrap()));
         }
         thread::spawn(move || retry_dead_connections(psc1, alive1));
