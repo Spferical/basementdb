@@ -334,9 +334,8 @@ impl Network {
     pub fn send_to_all_and_recv(
         &self,
         m: Message,
-    ) -> HashMap<signed::Public, Result<Message, io::Error>> {
+    ) -> Receiver<(signed::Public, Result<Message, io::Error>)> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        let mut results = HashMap::new();
         let (tx, rx): (
             Sender<(signed::Public, Result<Message, io::Error>)>,
             Receiver<(signed::Public, Result<Message, io::Error>)>,
@@ -353,20 +352,15 @@ impl Network {
                     scoped.execute(move || {
                         let send_res = Network::_send(m1, tcp_client);
                         if send_res.is_err() {
-                            tx1.send((pub_key, Err(send_res.unwrap_err()))).unwrap();
+                            tx1.send((pub_key, Err(send_res.unwrap_err()))).ok();
                         } else {
-                            tx1.send((pub_key, Network::_recv(tcp_client))).unwrap();
+                            tx1.send((pub_key, Network::_recv(tcp_client))).ok();
                         }
                     });
                 }
             }
         });
-
-        for msg in rx.recv() {
-            results.insert(msg.0, msg.1);
-        }
-
-        return results;
+        return rx;
     }
 
     pub fn halt(&self) {

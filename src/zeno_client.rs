@@ -1,8 +1,4 @@
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time;
 
 use message;
 use signed;
@@ -39,34 +35,15 @@ impl Client {
         let um = message::UnsignedMessage::Request(rm);
         let s = signed::Signed::new(um, &self.keypair.1);
         let m = message::Message::Signed(s);
-        let done = Arc::new(Mutex::new(false));
-        let (tx, rx) = mpsc::channel();
-        for rec in self.server_pubkeys.iter() {
-            let tx1 = tx.clone();
-            let net = self.net.clone();
-            let m1 = m.clone();
-            let rec1 = rec.clone();
-            let done1 = done.clone();
-            thread::spawn(move || loop {
-                if let Ok(reply) = net.send_recv(m1.clone(), rec1) {
-                    tx1.send((rec1, reply)).ok();
-                    break;
-                } else if *done1.lock().unwrap() {
-                    break;
-                }
-                thread::sleep(time::Duration::from_millis(100));
-            });
-        }
-
         let mut responses = HashMap::new();
-        for (_target, _msg) in rx.iter() {
-            let num = responses.entry(0).or_insert(0);
-            *num += 1;
-            if *num > 0 {
-                *done.lock().unwrap() = true;
-                return;
+        loop {
+            for (_target, _msg) in self.net.send_to_all_and_recv(m.clone()).recv() {
+                let num = responses.entry(0).or_insert(0);
+                *num += 1;
+                if *num > 0 {
+                    return;
+                }
             }
         }
-        unreachable!();
     }
 }
