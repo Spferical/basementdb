@@ -29,7 +29,7 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct RequestMessage {
     pub o: Vec<u8>,        // Operation to be performed
     pub t: u64,            // Timestamp assigned by the client to each request
@@ -37,7 +37,7 @@ pub struct RequestMessage {
     pub s: bool,           // Flag indicating if this is a strong operation
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct OrderedRequestMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
@@ -48,7 +48,7 @@ pub struct OrderedRequestMessage {
     pub nd: Vec<u8>,       // nd is a set of non-deterministic application variables
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ClientResponseMessage {
     pub response: ConcreteClientResponseMessage, // The first chunk of the response
     pub j: signed::Public,                       // Replica public key
@@ -56,13 +56,13 @@ pub struct ClientResponseMessage {
     pub or: OrderedRequestMessage,               // OrderedRequestMessage
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub enum ConcreteClientResponseMessage {
     SpecReply(signed::Signed<SpecReplyMessage>),
     Reply(signed::Signed<ReplyMessage>),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct SpecReplyMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
@@ -72,13 +72,13 @@ pub struct SpecReplyMessage {
     pub t: u64,            // Timestamp assigned by the client to each request
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct CommitMessage {
     pub or: OrderedRequestMessage, // OrderedRequestMessage
     pub j: signed::Public,         // Replica public key
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ReplyMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
@@ -88,7 +88,7 @@ pub struct ReplyMessage {
     pub t: u64,            // Timestamp assigned by the client to each request
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct FillHoleMessage {
     pub v: u64,            // Current view number
     pub n: u64,            // Highest sequence number executed
@@ -96,31 +96,31 @@ pub struct FillHoleMessage {
     pub i: signed::Public, // Primary public key
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct TestMessage {
     pub c: signed::Public,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct IHateThePrimaryMessage {}
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ViewChangeMessage {}
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct NewViewMessage {}
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ViewConfirmMessage {}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct POMMessage {}
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct PODMessage {}
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct POAMessage {}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct CheckPointMessage {}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub enum UnsignedMessage {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
@@ -145,7 +145,7 @@ pub enum UnsignedMessage {
 
 impl StrSerialize<Message> for UnsignedMessage {}
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     Unsigned(UnsignedMessage),
     Signed(Signed<UnsignedMessage>),
