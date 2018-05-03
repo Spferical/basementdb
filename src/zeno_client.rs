@@ -6,6 +6,7 @@ use signed;
 use tcp::Network;
 use zeno::Zeno;
 
+#[allow(dead_code)]
 pub struct Client {
     net: Network,
     seqno: u64,
