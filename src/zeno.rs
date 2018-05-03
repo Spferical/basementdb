@@ -58,6 +58,7 @@ pub struct Zeno {
     url: String,
     me: signed::Public,
     private_me: signed::Private,
+    max_failures: u64,
     state: Arc<Mutex<ZenoState>>,
 }
 
@@ -300,11 +301,13 @@ pub fn start_zeno(
     pubkeys_to_url: HashMap<signed::Public, String>,
     primary: bool,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
+    max_failures: u64,
 ) -> Zeno {
     let zeno = Zeno {
         url: url.clone(),
         me: kp.clone().0,
         private_me: kp.clone().1,
+        max_failures: max_failures,
         state: Arc::new(Mutex::new(ZenoState {
             pubkeys: pubkeys_to_url
                 .keys()
@@ -356,7 +359,9 @@ mod tests {
         ];
         let mut pubkeys_to_urls = HashMap::new();
         let mut keypairs: Vec<signed::KeyPair> = Vec::new();
-        for i in 0..4 {
+        let num_servers = 4;
+        let max_failures = 1;
+        for i in 0..num_servers {
             let kp = signed::gen_keys();
             keypairs.push(kp.clone());
             pubkeys_to_urls.insert(kp.0, urls[i].clone());
@@ -374,6 +379,7 @@ mod tests {
                 zeno_pkeys_to_urls,
                 i == 0,
                 tx,
+                max_failures,
             ));
             thread::spawn(move || {
                 loop {
@@ -393,7 +399,7 @@ mod tests {
         let t = thread::spawn(move || {
             // give the servers some time to know each other
             thread::sleep(time::Duration::new(1, 100));
-            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone());
+            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone(), max_failures);
             c.request(vec![], false);
             tx.send(()).unwrap();
         });

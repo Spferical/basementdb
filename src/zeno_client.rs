@@ -9,12 +9,14 @@ pub struct Client {
     seqno: u64,
     keypair: signed::KeyPair,
     server_pubkeys: Vec<signed::Public>,
+    max_failures: u64,
 }
 
 impl Client {
     pub fn new(
         keypair: signed::KeyPair,
         pubkeys_to_url: HashMap<signed::Public, String>,
+        max_failures: u64,
     ) -> Client {
         let pubkeys = pubkeys_to_url.keys().map(|p| *p).collect();
         Client {
@@ -22,6 +24,7 @@ impl Client {
             seqno: 0,
             keypair: keypair,
             server_pubkeys: pubkeys,
+            max_failures: max_failures,
         }
     }
 
@@ -40,7 +43,7 @@ impl Client {
             for (_target, _msg) in self.net.send_to_all_and_recv(m.clone()).recv() {
                 let num = responses.entry(0).or_insert(0);
                 *num += 1;
-                if *num > 0 {
+                if *num > self.max_failures {
                     return;
                 }
             }
