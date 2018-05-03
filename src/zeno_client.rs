@@ -53,6 +53,7 @@ impl Client {
             c: self.keypair.0,
             s: strong,
         };
+        self.seqno += 1;
         let um = UnsignedMessage::Request(rm);
         let s = signed::Signed::new(um, &self.keypair.1);
         let m = message::Message::Signed(s);
