@@ -30,7 +30,7 @@ impl Client {
         }
     }
 
-    fn get_data(&self, m: message::Message) -> Option<Vec<u8>>{
+    fn get_data(&self, m: message::Message) -> Option<Vec<u8>> {
         match m {
             message::Message::Signed(sm) => {
                 if let Some(u) = Zeno::verifier(sm) {
@@ -41,7 +41,7 @@ impl Client {
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
         }
     }
@@ -69,8 +69,8 @@ impl Client {
                                 // we got a weak quorum of replies
                                 return data;
                             }
-                        },
-                        None => {},
+                        }
+                        None => {}
                     }
                 }
             }

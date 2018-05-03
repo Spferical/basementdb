@@ -396,18 +396,12 @@ mod tests {
 
     #[test]
     fn test_one_message() {
-        test_one_client(
-            vec![vec![1, 2, 3]],
-            vec![vec![1, 2, 3]],
-            4, 1, 44440);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44440);
     }
 
     #[test]
     fn test_many_messages() {
-        test_one_client(
-            vec![vec![1], vec![2]],
-            vec![vec![1], vec![2]],
-            4, 1, 44450);
+        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, 44450);
     }
 
     fn test_one_client(
@@ -463,7 +457,10 @@ mod tests {
             // give the servers some time to know each other
             thread::sleep(time::Duration::new(1, 100));
             let mut c = zeno_client::Client::new(
-                signed::gen_keys(), pubkeys_to_urls.clone(), max_failures as u64);
+                signed::gen_keys(),
+                pubkeys_to_urls.clone(),
+                max_failures as u64,
+            );
             for x in input {
                 assert_eq!(c.request(x.clone(), false), x);
             }
