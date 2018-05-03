@@ -291,10 +291,11 @@ fn on_ordered_request(z: &Zeno, om: OrderedRequestMessage, _net: Network) {
 }
 
 impl Zeno {
-    fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
+    pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
         match m.clone().base {
             UnsignedMessage::Request(rm) => m.verify(&rm.c),
             UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
+            UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
             _ => None,
         }
     }
@@ -445,7 +446,7 @@ mod tests {
             thread::sleep(time::Duration::new(1, 100));
             let mut c =
                 zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone(), max_failures);
-            c.request(vec![], false);
+            assert_eq!(c.request(vec![], false), vec![]);
             tx.send(()).unwrap();
         });
         assert_eq!(rx.recv_timeout(time::Duration::from_secs(5)), Ok(()));
