@@ -33,6 +33,7 @@ pub enum ApplyMsg {
     Apply(Vec<u8>),
 }
 
+/// stores the mutable state of our zeno server
 #[allow(dead_code)]
 struct ZenoState {
     pubkeys: Vec<signed::Public>,
@@ -53,6 +54,7 @@ struct ZenoState {
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 }
 
+/// represents the entire state of our zeno server
 #[derive(Clone)]
 pub struct Zeno {
     url: String,
@@ -62,6 +64,9 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
+/// returns whether we've already handled the given client request already
+/// (specifically, whether the last request in zs.all_requests is newer than
+/// msg)
 fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
     match zs.requests.get(&msg.c) {
         Some(reqs) => match reqs.last() {
@@ -72,10 +77,12 @@ fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
     }
 }
 
+/// returns a signed message representing msg signed with priv_key
 fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Message {
     Message::Signed(Signed::new(msg, priv_key))
 }
 
+/// given a client request, does lots of stuff
 fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
@@ -185,6 +192,9 @@ fn order_message(
     }
 }
 
+/// Generates a client response based on a request and orderedrequest
+///
+/// Assumes that we've already verified om and msg and they are correct.
 fn generate_client_response(
     z: &Zeno,
     app_response: Vec<u8>,
@@ -213,10 +223,11 @@ fn generate_client_response(
     ))
 }
 
-/// Executes the given request.
-/// Performs no checks.
+/// Runs checks and executes the given request.
 ///
-/// Returns a message to be sent to the client.
+/// If the request checks out, this method sends it to the
+/// application and returns a channel receiver on which the application
+/// will send its response.
 fn check_and_execute_request(
     z: &Zeno,
     zs: &mut ZenoState,
