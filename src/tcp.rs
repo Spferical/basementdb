@@ -331,6 +331,44 @@ impl Network {
         return results;
     }
 
+    pub fn send_to_all_and_recv(
+        &self,
+        m: Message,
+    ) -> HashMap<signed::Public, Result<Message, io::Error>> {
+        let mut psc = self.peer_send_clients.lock().unwrap();
+        let mut results = HashMap::new();
+        let (tx, rx): (
+            Sender<(signed::Public, Result<Message, io::Error>)>,
+            Receiver<(signed::Public, Result<Message, io::Error>)>,
+        ) = mpsc::channel();
+
+        let mut pool = Pool::new(psc.len() as u32);
+        pool.scoped(|scoped| {
+            for kv in &mut *psc {
+                let (&pub_key, tcp_client) = kv;
+                if self.my_ip_and_port != tcp_client.ip_and_port {
+                    let m1 = m.clone();
+                    let tx1 = tx.clone();
+
+                    scoped.execute(move || {
+                        let send_res = Network::_send(m1, tcp_client);
+                        if send_res.is_err() {
+                            tx1.send((pub_key, Err(send_res.unwrap_err()))).unwrap();
+                        } else {
+                            tx1.send((pub_key, Network::_recv(tcp_client))).unwrap();
+                        }
+                    });
+                }
+            }
+        });
+
+        for msg in rx.recv() {
+            results.insert(msg.0, msg.1);
+        }
+
+        return results;
+    }
+
     pub fn halt(&self) {
         *self.alive_state.lock().unwrap() = false;
         self.server_channel.send(TCPServerCommand::Halt).unwrap();
