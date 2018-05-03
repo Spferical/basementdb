@@ -16,10 +16,10 @@ use tcp::Network;
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
-        println!("{:?} {}", $z.url, $fmt)
+        println!("{} {}", $z.url, $fmt)
     };
     ($z:ident, $fmt: expr, $($arg:expr),*) => {
-        println!("{:?} {}", $z.url, format!($fmt, $($arg),*))
+        println!("{} {}", $z.url, format!($fmt, $($arg),*))
     };
 }
 
@@ -395,17 +395,35 @@ mod tests {
     use zeno_client;
 
     #[test]
-    fn client_gets_response() {
-        let urls = vec![
-            "127.0.0.1:44441".to_string(),
-            "127.0.0.1:44442".to_string(),
-            "127.0.0.1:44443".to_string(),
-            "127.0.0.1:44444".to_string(),
-        ];
+    fn test_one_message() {
+        test_one_client(
+            vec![vec![1, 2, 3]],
+            vec![vec![1, 2, 3]],
+            4, 1, 44440);
+    }
+
+    #[test]
+    fn test_many_messages() {
+        test_one_client(
+            vec![vec![1], vec![2]],
+            vec![vec![1], vec![2]],
+            4, 1, 44450);
+    }
+
+    fn test_one_client(
+        input: Vec<Vec<u8>>,
+        output: Vec<Vec<u8>>,
+        num_servers: usize,
+        max_failures: usize,
+        first_port: usize,
+    ) {
+        let mut urls = Vec::new();
+        for i in 0..num_servers {
+            urls.push(format!("127.0.0.1:{}", first_port + i));
+        }
         let mut pubkeys_to_urls = HashMap::new();
         let mut keypairs: Vec<signed::KeyPair> = Vec::new();
-        let num_servers = 4;
-        let max_failures = 1;
+
         for i in 0..num_servers {
             let kp = signed::gen_keys();
             keypairs.push(kp.clone());
@@ -413,7 +431,7 @@ mod tests {
         }
 
         let mut zenos = Vec::new();
-        for i in 0..4 {
+        for i in 0..num_servers {
             let (tx, rx) = mpsc::channel();
             let mut zeno_pkeys_to_urls = pubkeys_to_urls.clone();
             zeno_pkeys_to_urls.remove(&keypairs[i].0);
@@ -424,7 +442,7 @@ mod tests {
                 zeno_pkeys_to_urls,
                 i == 0,
                 tx,
-                max_failures,
+                max_failures as u64,
             ));
             thread::spawn(move || {
                 loop {
@@ -444,9 +462,11 @@ mod tests {
         let t = thread::spawn(move || {
             // give the servers some time to know each other
             thread::sleep(time::Duration::new(1, 100));
-            let mut c =
-                zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone(), max_failures);
-            assert_eq!(c.request(vec![], false), vec![]);
+            let mut c = zeno_client::Client::new(
+                signed::gen_keys(), pubkeys_to_urls.clone(), max_failures as u64);
+            for x in input {
+                assert_eq!(c.request(x.clone(), false), x);
+            }
             tx.send(()).unwrap();
         });
         assert_eq!(rx.recv_timeout(time::Duration::from_secs(5)), Ok(()));
