@@ -41,6 +41,7 @@ impl Client {
         let mut responses = HashMap::new();
         loop {
             for (_target, _msg) in self.net.send_to_all_and_recv(m.clone()).recv() {
+                println!("Client got msg {:?}", _msg);
                 let num = responses.entry(0).or_insert(0);
                 *num += 1;
                 if *num > self.max_failures {

@@ -42,7 +42,7 @@ struct ZenoState {
     v: i64,
     h: HashChain,
     requests: HashMap<signed::Public, Vec<usize>>,
-    replies: HashMap<signed::Public, Option<UnsignedMessage>>,
+    replies: HashMap<signed::Public, Option<Message>>,
 
     all_requests: Vec<RequestMessage>,
 
@@ -62,12 +62,29 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn on_request_message(z: &Zeno, m: &RequestMessage, n: &Network) -> Option<Message> {
+fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
+    match zs.requests.get(&msg.c) {
+        Some(reqs) => match reqs.last() {
+            Some(&last_req_n) => zs.all_requests[last_req_n].t >= msg.t,
+            None => false,
+        },
+        None => false,
+    }
+}
+
+fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Message {
+    Message::Signed(Signed::new(msg, priv_key))
+}
+
+fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
+    if already_handled_msg(&zs, m) {
+        return Some(zs.replies.get(&m.c).unwrap().clone().unwrap());
+    }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req {
         let or = zs.pending_ors.remove(0);
-        match check_and_execute_request(z, &mut zs, &or, m, n) {
+        match check_and_execute_request(z, &mut zs, &or, m, net) {
             Some(rx) => {
                 drop(zs);
                 let app_resp = rx.recv().unwrap();
@@ -78,9 +95,9 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, n: &Network) -> Option<Messa
     } else {
         match zs.status {
             ZenoStatus::Primary => {
-                let or_opt = order_message(z, &mut zs, m, n);
+                let or_opt = order_message(z, &mut zs, m, net);
                 match or_opt {
-                    Some(or) => match check_and_execute_request(z, &mut zs, &or, m, n) {
+                    Some(or) => match check_and_execute_request(z, &mut zs, &or, m, net) {
                         Some(rx) => {
                             drop(zs);
                             let app_resp = rx.recv().unwrap();
@@ -97,7 +114,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, n: &Network) -> Option<Messa
                 drop(zs);
                 let or = rx.recv().unwrap();
                 let mut zs = z.state.lock().unwrap();
-                match check_and_execute_request(z, &mut zs, &or, m, n) {
+                match check_and_execute_request(z, &mut zs, &or, m, net) {
                     Some(rx) => {
                         drop(zs);
                         let app_resp = rx.recv().unwrap();
@@ -110,6 +127,9 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, n: &Network) -> Option<Messa
     }
 }
 
+/// Takes the given message and returns an OrderedRequestMessage to be applied.
+/// Also starts a thread to send the OrderedRequestMessage to all servers.
+/// Does not apply the message.
 fn order_message(
     z: &Zeno,
     zs: &mut ZenoState,
@@ -132,9 +152,6 @@ fn order_message(
     if last_t + 1 != m.t as i64 {
         None
     } else {
-        zs.all_requests.push(m.clone());
-        zs.requests.get_mut(&m.c).unwrap().push(zs.n as usize);
-
         let d_req = digest::d(m.clone());
         let h_n = match zs.h.last() {
             None => d_req,
@@ -155,12 +172,10 @@ fn order_message(
         let od1 = od.clone();
         let private_me1 = z.private_me.clone();
         thread::spawn(move || {
-            println!("Sending OR!");
-            let res_map = n1.send_to_all(Message::Signed(Signed::new(
+            let res_map = n1.send_to_all(get_signed_message(
                 UnsignedMessage::OrderedRequest(od1),
                 &private_me1,
-            )));
-            println!("OR SEND RESULTS: {:?}", res_map);
+            ));
             for (_key, val) in res_map {
                 val.ok();
             }
@@ -235,11 +250,19 @@ fn check_and_execute_request(
         unimplemented!("History digests don't match");
     }
 
+    // checks done, let's execute
     let (tx, rx) = mpsc::channel();
     zs.apply_tx
         .send((ApplyMsg::Apply(msg.o.clone()), tx))
         .unwrap();
+
     zs.n += 1;
+    z_debug!(z, "Executed request {}", zs.n);
+    zs.all_requests.push(msg.clone());
+    zs.requests.entry(msg.c).or_insert_with(Vec::new);
+    zs.requests.get_mut(&msg.c).unwrap().push(zs.n as usize);
+    assert!(zs.all_requests.len() - 1 == zs.n as usize);
+
     zs.h.push(history_digest);
     Some(rx)
 }
@@ -267,7 +290,17 @@ impl Zeno {
 
     fn match_unsigned_message(&self, m: UnsignedMessage, n: Network) -> Option<Message> {
         match m {
-            UnsignedMessage::Request(rm) => on_request_message(self, &rm, &n),
+            UnsignedMessage::Request(rm) => {
+                let reply_opt = on_request_message(self, &rm, &n);
+                match reply_opt.clone() {
+                    Some(reply) => {
+                        let mut zs = self.state.lock().unwrap();
+                        zs.replies.insert(rm.c, Some(reply));
+                    }
+                    None => {}
+                };
+                reply_opt
+            }
             UnsignedMessage::OrderedRequest(orm) => {
                 on_ordered_request(self, orm, n);
                 None
@@ -399,7 +432,8 @@ mod tests {
         let t = thread::spawn(move || {
             // give the servers some time to know each other
             thread::sleep(time::Duration::new(1, 100));
-            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone(), max_failures);
+            let mut c =
+                zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls.clone(), max_failures);
             c.request(vec![], false);
             tx.send(()).unwrap();
         });
