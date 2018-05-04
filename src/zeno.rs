@@ -543,7 +543,8 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let t = thread::spawn(move || {
             // give the servers some time to know each other
-            thread::sleep(time::Duration::new(1, 100));
+            // TODO: detect stabilization rather than sleep
+            thread::sleep(time::Duration::new(2, 0));
             let mut c = zeno_client::Client::new(
                 signed::gen_keys(),
                 pubkeys_to_urls.clone(),
