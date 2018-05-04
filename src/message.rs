@@ -29,6 +29,8 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
+type CommitCertificate = Vec<CommitMessage>;
+
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct RequestMessage {
     pub o: Vec<u8>,        // Operation to be performed
