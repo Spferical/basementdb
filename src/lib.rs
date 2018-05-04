@@ -4,13 +4,11 @@ extern crate bincode;
 extern crate bufstream;
 extern crate data_encoding;
 extern crate serde;
-
 #[macro_use]
 extern crate serde_derive;
-
 extern crate sodiumoxide;
-
 extern crate scoped_threadpool;
+extern crate chrono;
 
 pub mod digest;
 pub mod message;

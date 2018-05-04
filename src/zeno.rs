@@ -6,6 +6,7 @@ use std::sync::MutexGuard;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use chrono::Utc;
 
 use digest;
 use digest::{HashChain, HashDigest};
@@ -19,10 +20,12 @@ use tcp::Network;
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
-        println!("{} {}", $z.url, $fmt)
+        let time_str = Utc::now().format("%T%.3f");
+        println!("[{}] {} {}", time_str, $z.url, $fmt)
     };
     ($z:ident, $fmt: expr, $($arg:expr),*) => {
-        println!("{} {}", $z.url, format!($fmt, $($arg),*))
+        let time_str = Utc::now().format("%T%.3f");
+        println!("[{}] {} {}", time_str, $z.url, format!($fmt, $($arg),*))
     };
 }
 
