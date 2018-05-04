@@ -461,8 +461,8 @@ mod tests {
                 pubkeys_to_urls.clone(),
                 max_failures as u64,
             );
-            for x in input {
-                assert_eq!(c.request(x.clone(), false), x);
+            for i in 0..input.len() {
+                assert_eq!(c.request(input[i].clone(), false), output[i]);
             }
             tx.send(()).unwrap();
         });
