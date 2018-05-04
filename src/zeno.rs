@@ -103,7 +103,8 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     if already_handled_msg(&zs, m) {
         return Some(zs.replies.get(&m.c).unwrap().clone().unwrap());
     }
-    if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req {
+    if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
+        && zs.pending_ors[0].n == (zs.n + 1) as u64 {
         let or = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &or, m, net)
     } else {
