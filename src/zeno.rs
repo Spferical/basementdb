@@ -270,6 +270,15 @@ fn check_and_execute_request(
     assert!(zs.all_requests.len() - 1 == zs.n as usize);
     zs.h.push(history_digest);
 
+    // if we already have a next request queued, let that thread know
+    if zs.pending_ors.len() > 0 && zs.pending_ors[0].n == (zs.n + 1) as u64 {
+        let d_req = zs.pending_ors[0].d_req.clone();
+        if let Some(tx_next) = zs.reqs_without_ors.remove(&d_req) {
+            z_debug!(z, "Sending next request OR for {}", zs.n + 1);
+            tx_next.send(zs.pending_ors.remove(0)).unwrap();
+        }
+    }
+
     if msg.s {
         let mut commit_cert = zs.pending_commits
             .get(&or.d_req)
@@ -318,14 +327,23 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(z: &Zeno, om: OrderedRequestMessage, _net: Network) {
+fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
     let zs = &mut *z.state.lock().unwrap();
-    match zs.reqs_without_ors.remove(&om.d_req) {
+    match zs.reqs_without_ors.remove(&or.d_req) {
         Some(tx) => {
-            tx.send(om).unwrap();
+            if or.n == (zs.n + 1) as u64 {
+                tx.send(or).unwrap();
+            } else {
+                zs.reqs_without_ors.insert(or.d_req.clone(), tx);
+                zs.pending_ors.push(or);
+                zs.pending_ors.sort_by(|a, b| a.n.cmp(&b.n));
+            }
         }
         None => {
-            zs.pending_ors.push(om);
+            if !zs.pending_ors.iter().any(|pending_or| *pending_or == or) {
+                zs.pending_ors.push(or);
+                zs.pending_ors.sort_by(|a, b| a.n.cmp(&b.n));
+            }
         }
     }
 }
