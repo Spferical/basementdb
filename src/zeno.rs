@@ -631,6 +631,33 @@ mod tests {
         assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
     }
 
+    #[test]
+    fn test_many_clients_strong_consistency() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            let (tx, rx) = mpsc::channel();
+            client_rxs.push(rx);
+            let pubkeys_to_urls1 = pubkeys_to_urls.clone();
+            thread::spawn(move || {
+                // give the servers some time to know each other
+                // TODO: detect stabilization rather than sleep
+                thread::sleep(time::Duration::new(2, 0));
+                let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls1, 1);
+                for _ in 0..20 {
+                    c.request(vec![1], true);
+                }
+                tx.send(()).unwrap();
+            });
+        }
+        let start = time::Instant::now();
+        let total_timeout = time::Duration::from_secs(30);
+        for rx in client_rxs {
+            assert_eq!(rx.recv_timeout(total_timeout - start.elapsed()), Ok(()));
+        }
+    }
+
     fn test_input_output(
         input: Vec<Vec<u8>>,
         output: Vec<Vec<u8>>,
