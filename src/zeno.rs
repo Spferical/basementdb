@@ -554,7 +554,7 @@ mod tests {
             }
             tx.send(()).unwrap();
         });
-        assert_eq!(rx.recv_timeout(time::Duration::from_secs(5)), Ok(()));
+        assert_eq!(rx.recv_timeout(time::Duration::from_secs(30)), Ok(()));
         t.join().unwrap();
     }
 }
