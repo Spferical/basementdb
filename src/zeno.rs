@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -8,7 +10,7 @@ use std::thread;
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
-use message::{ClientResponseMessage, ConcreteClientResponseMessage, Message,
+use message::{ClientResponseMessage, CommitMessage, ConcreteClientResponseMessage, Message,
               OrderedRequestMessage, RequestMessage, UnsignedMessage};
 use signed;
 use signed::Signed;
@@ -47,8 +49,14 @@ struct ZenoState {
 
     all_requests: Vec<RequestMessage>,
 
-    pending_reqs: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
+    // channels for threads handling requests without ORs
+    reqs_without_ors: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
+    // channels for threads handling requests without COMMITs
+    reqs_without_commits: HashMap<HashDigest, Sender<CommitMessage>>,
+    // ORs received for requests we haven't gotten yet
     pending_ors: Vec<OrderedRequestMessage>,
+    // COMMITs received for requests we haven't gotten yet
+    pending_commits: HashMap<HashDigest, Vec<CommitMessage>>,
 
     status: ZenoStatus,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
@@ -91,23 +99,24 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req {
         let or = zs.pending_ors.remove(0);
-        check_and_execute_request(z, &mut zs, &or, m, net)
+        check_and_execute_request(z, zs, &or, m, net)
     } else {
         match zs.status {
             ZenoStatus::Primary => {
                 let or_opt = order_message(z, &mut zs, m, net);
                 match or_opt {
-                    Some(or) => check_and_execute_request(z, &mut zs, &or, m, net),
+                    Some(or) => check_and_execute_request(z, zs, &or, m, net),
                     None => None,
                 }
             }
             ZenoStatus::Replica => {
                 let (tx, rx) = mpsc::channel();
-                zs.pending_reqs.insert(d_req, tx);
+                zs.reqs_without_ors.insert(d_req.clone(), tx);
                 drop(zs);
                 let or = rx.recv().unwrap();
                 let mut zs = z.state.lock().unwrap();
-                check_and_execute_request(z, &mut zs, &or, m, net)
+                zs.reqs_without_ors.remove(&d_req);
+                check_and_execute_request(z, zs, &or, m, net)
             }
         }
     }
@@ -209,10 +218,10 @@ fn generate_client_response(
 /// will send its response.
 fn check_and_execute_request(
     z: &Zeno,
-    zs: &mut ZenoState,
+    mut zs: MutexGuard<ZenoState>,
     or: &OrderedRequestMessage,
     msg: &RequestMessage,
-    _net: &Network,
+    net: &Network,
 ) -> Option<Message> {
     z_debug!(z, "Executing request!");
     // check valid view
@@ -250,23 +259,84 @@ fn check_and_execute_request(
     z_debug!(z, "Executed request {}", zs.n);
     zs.all_requests.push(msg.clone());
     zs.requests.entry(msg.c).or_insert_with(Vec::new);
-    zs.requests.get_mut(&msg.c).unwrap().push(zs.n as usize);
+    let n = zs.n as usize;
+    zs.requests.get_mut(&msg.c).unwrap().push(n);
     assert!(zs.all_requests.len() - 1 == zs.n as usize);
-
     zs.h.push(history_digest);
-    drop(zs);
+
+    if msg.s {
+        let mut commit_set = zs.pending_commits
+            .get(&or.d_req)
+            .unwrap_or(&Vec::new())
+            .into_iter()
+            .filter(|commit| commit.or == *or)
+            .map(|commit| commit.j)
+            .collect::<HashSet<signed::Public>>();
+        commit_set.insert(z.me.clone());
+        zs.pending_commits.remove(&or.d_req);
+
+        let (tx_commit, rx_commit) = mpsc::channel();
+        zs.reqs_without_commits.insert(or.d_req.clone(), tx_commit);
+        drop(zs);
+
+        let n1 = net.clone();
+        let commit_msg = get_signed_message(
+            UnsignedMessage::Commit(CommitMessage {
+                or: or.clone(),
+                j: z.me,
+            }),
+            &z.private_me,
+        );
+        thread::spawn(move || {
+            let res_map = n1.send_to_all(commit_msg);
+            for (_key, val) in res_map {
+                val.ok();
+            }
+            println!("Sent COMMIT!");
+        });
+
+        while commit_set.len() <= z.max_failures as usize {
+            let commit = rx_commit.recv().unwrap();
+            if commit.or == *or {
+                commit_set.insert(commit.j);
+            }
+        }
+
+        let mut zs1 = z.state.lock().unwrap();
+        zs1.reqs_without_commits.remove(&or.d_req);
+    } else {
+        drop(zs);
+    }
+
     let app_resp = rx.recv().unwrap();
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
 fn on_ordered_request(z: &Zeno, om: OrderedRequestMessage, _net: Network) {
     let zs = &mut *z.state.lock().unwrap();
-    match zs.pending_reqs.remove(&om.d_req) {
+    match zs.reqs_without_ors.remove(&om.d_req) {
         Some(tx) => {
             tx.send(om).unwrap();
         }
         None => {
             zs.pending_ors.push(om);
+        }
+    }
+}
+
+fn on_commit(z: &Zeno, cm: CommitMessage) {
+    let zs = &mut *z.state.lock().unwrap();
+    match zs.reqs_without_commits.get(&cm.or.d_req) {
+        Some(tx) => {
+            z_debug!(z, "Sending commit to existing thread");
+            tx.send(cm).ok();
+        }
+        None => {
+            z_debug!(z, "queueing commit");
+            zs.pending_commits
+                .entry(cm.or.d_req.clone())
+                .or_insert_with(Vec::new);
+            zs.pending_commits.get_mut(&cm.or.d_req).unwrap().push(cm);
         }
     }
 }
@@ -277,6 +347,7 @@ impl Zeno {
             UnsignedMessage::Request(rm) => m.verify(&rm.c),
             UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
             UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
+            UnsignedMessage::Commit(cm) => m.verify(&cm.j),
             _ => None,
         }
     }
@@ -296,6 +367,11 @@ impl Zeno {
             }
             UnsignedMessage::OrderedRequest(orm) => {
                 on_ordered_request(self, orm, n);
+                None
+            }
+            UnsignedMessage::Commit(cm) => {
+                println!("GOT COMMIT!");
+                on_commit(self, cm);
                 None
             }
             _ => None,
@@ -351,8 +427,10 @@ pub fn start_zeno(
                 ZenoStatus::Replica
             },
             all_requests: Vec::new(),
-            pending_reqs: HashMap::new(),
+            reqs_without_ors: HashMap::new(),
+            reqs_without_commits: HashMap::new(),
             pending_ors: Vec::new(),
+            pending_commits: HashMap::new(),
             apply_tx: apply_tx,
         })),
     };
@@ -377,12 +455,36 @@ mod tests {
 
     #[test]
     fn test_one_message() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44440);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44440, false);
+    }
+
+    #[test]
+    fn test_one_message_strong() {
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44450, true);
     }
 
     #[test]
     fn test_many_messages() {
-        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, 44450);
+        test_one_client(
+            vec![vec![1], vec![2]],
+            vec![vec![1], vec![2]],
+            4,
+            1,
+            44460,
+            false,
+        );
+    }
+
+    #[test]
+    fn test_many_messages_strong() {
+        test_one_client(
+            vec![vec![1], vec![2]],
+            vec![vec![1], vec![2]],
+            4,
+            1,
+            44470,
+            true,
+        );
     }
 
     fn test_one_client(
@@ -391,6 +493,7 @@ mod tests {
         num_servers: usize,
         max_failures: usize,
         first_port: usize,
+        strong: bool,
     ) {
         let mut urls = Vec::new();
         for i in 0..num_servers {
@@ -443,7 +546,7 @@ mod tests {
                 max_failures as u64,
             );
             for i in 0..input.len() {
-                assert_eq!(c.request(input[i].clone(), false), output[i]);
+                assert_eq!(c.request(input[i].clone(), strong), output[i]);
             }
             tx.send(()).unwrap();
         });
