@@ -373,7 +373,7 @@ impl Zeno {
                 None
             }
             UnsignedMessage::Commit(cm) => {
-                println!("GOT COMMIT!");
+                z_debug!(self, "GOT COMMIT!");
                 on_commit(self, cm);
                 None
             }
