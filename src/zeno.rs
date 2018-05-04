@@ -508,7 +508,7 @@ mod tests {
         num_clients: usize,
     ) {
         let mut urls = Vec::new();
-        for i in 0..num_servers {
+        for _ in 0..num_servers {
             urls.push(format!("127.0.0.1:{}", port_adj()));
         }
         let mut pubkeys_to_urls = HashMap::new();
@@ -548,14 +548,13 @@ mod tests {
             });
         }
         let mut client_rxs = Vec::new();
-        let mut client_threads = Vec::new();
         for _ in 0..num_clients {
             let (tx, rx) = mpsc::channel();
             client_rxs.push(rx);
             let input1 = input.clone();
             let output1 = output.clone();
             let pubkeys_to_urls1 = pubkeys_to_urls.clone();
-            client_threads.push(thread::spawn(move || {
+            thread::spawn(move || {
                 // give the servers some time to know each other
                 // TODO: detect stabilization rather than sleep
                 thread::sleep(time::Duration::new(2, 0));
@@ -568,15 +567,12 @@ mod tests {
                     assert_eq!(c.request(input1[i].clone(), strong), output1[i]);
                 }
                 tx.send(()).unwrap();
-            }));
+            });
         }
         let start = time::Instant::now();
         let total_timeout = time::Duration::from_secs(30);
         for rx in client_rxs {
             assert_eq!(rx.recv_timeout(total_timeout - start.elapsed()), Ok(()));
-        }
-        for t in client_threads {
-            t.join().unwrap();
         }
     }
 }
