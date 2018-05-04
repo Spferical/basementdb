@@ -479,6 +479,24 @@ mod tests {
         }
     }
 
+    struct CountApp {
+        x: u8,
+    }
+    impl TestApp for CountApp {
+        fn new() -> CountApp {
+            CountApp { x: 0 }
+        }
+        fn apply(&mut self, input: ApplyMsg) -> Vec<u8> {
+            match input {
+                ApplyMsg::Apply(y) => {
+                    assert_eq!(y.len(), 1);
+                    self.x += y[0];
+                    vec![self.x]
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_one_message() {
         test_input_output(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, false, 1);
@@ -575,6 +593,24 @@ mod tests {
             });
         }
         pubkeys_to_urls
+    }
+
+    #[test]
+    fn test_one_client_strong_consistency() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            // give the servers some time to know each other
+            // TODO: detect stabilization rather than sleep
+            thread::sleep(time::Duration::new(2, 0));
+            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls, 1);
+            for i in 1..101 {
+                assert_eq!(c.request(vec![1], true), vec![i]);
+            }
+            tx.send(()).unwrap();
+        });
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
     }
 
     fn test_input_output(
