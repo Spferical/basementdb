@@ -297,7 +297,7 @@ fn check_and_execute_request(
             println!("Sent COMMIT!");
         });
 
-        while commit_cert.len() <= z.max_failures as usize - 1 {
+        while commit_cert.len() < 2 * z.max_failures as usize {
             let commit = rx_commit.recv().unwrap();
             if commit.or == *or {
                 commit_cert.insert(commit);
