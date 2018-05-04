@@ -499,14 +499,10 @@ mod tests {
         }
     }
 
-    fn test_input_output(
-        input: Vec<Vec<u8>>,
-        output: Vec<Vec<u8>>,
+    fn start_zenos(
         num_servers: usize,
         max_failures: usize,
-        strong: bool,
-        num_clients: usize,
-    ) {
+    ) -> (HashMap<signed::Public, String>) {
         let mut urls = Vec::new();
         for _ in 0..num_servers {
             urls.push(format!("127.0.0.1:{}", port_adj()));
@@ -547,6 +543,18 @@ mod tests {
                 }
             });
         }
+        pubkeys_to_urls
+    }
+
+    fn test_input_output(
+        input: Vec<Vec<u8>>,
+        output: Vec<Vec<u8>>,
+        num_servers: usize,
+        max_failures: usize,
+        strong: bool,
+        num_clients: usize,
+    ) {
+        let pubkeys_to_urls = start_zenos(num_servers, max_failures);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             let (tx, rx) = mpsc::channel();
