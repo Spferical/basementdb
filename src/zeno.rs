@@ -1,3 +1,4 @@
+use chrono::Utc;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -6,7 +7,6 @@ use std::sync::MutexGuard;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
-use chrono::Utc;
 
 use digest;
 use digest::{HashChain, HashDigest};
@@ -470,7 +470,7 @@ mod tests {
     struct EchoApp;
     impl TestApp for EchoApp {
         fn new() -> EchoApp {
-            EchoApp{}
+            EchoApp {}
         }
         fn apply(&mut self, input: ApplyMsg) -> Vec<u8> {
             match input {
@@ -478,7 +478,6 @@ mod tests {
             }
         }
     }
-
 
     #[test]
     fn test_one_message() {
@@ -492,17 +491,31 @@ mod tests {
 
     #[test]
     fn test_multiple_messages() {
-        test_input_output(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, false, 1);
+        test_input_output(
+            vec![vec![1], vec![2]],
+            vec![vec![1], vec![2]],
+            4,
+            1,
+            false,
+            1,
+        );
     }
 
     #[test]
     fn test_multiple_messages_strong() {
-        test_input_output(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, true, 1);
+        test_input_output(
+            vec![vec![1], vec![2]],
+            vec![vec![1], vec![2]],
+            4,
+            1,
+            true,
+            1,
+        );
     }
 
     #[test]
     fn test_many_messages_strong() {
-        let input : Vec<_> = (0..100).map(|i| vec![i]).collect();
+        let input: Vec<_> = (0..100).map(|i| vec![i]).collect();
         let output = input.clone();
         test_input_output(input, output, 4, 1, true, 1);
     }
@@ -555,7 +568,7 @@ mod tests {
                     match rx.recv() {
                         Ok((app_msg, tx)) => {
                             tx.send(app.apply(app_msg)).ok();
-                        },
+                        }
                         Err(_) => break,
                     }
                 }

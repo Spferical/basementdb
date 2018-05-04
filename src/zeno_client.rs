@@ -68,7 +68,8 @@ impl Client {
                             *num += 1;
                             println!("Client got response {:?} {} times", data, num);
                             if (strong && *num >= self.max_failures * 2 + 1)
-                                || (!strong && *num >= self.max_failures + 1) {
+                                || (!strong && *num >= self.max_failures + 1)
+                            {
                                 // we got a weak quorum of replies
                                 return data;
                             }
