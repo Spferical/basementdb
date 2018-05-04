@@ -10,8 +10,9 @@ use std::thread;
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
-use message::{ClientResponseMessage, CommitMessage, ConcreteClientResponseMessage, Message,
-              OrderedRequestMessage, RequestMessage, UnsignedMessage};
+use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
+              ConcreteClientResponseMessage, Message, OrderedRequestMessage, RequestMessage,
+              UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -60,6 +61,8 @@ struct ZenoState {
 
     status: ZenoStatus,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
+
+    last_cc: CommitCertificate,
 }
 
 /// represents the entire state of our zeno server
@@ -265,14 +268,13 @@ fn check_and_execute_request(
     zs.h.push(history_digest);
 
     if msg.s {
-        let mut commit_set = zs.pending_commits
+        let mut commit_cert = zs.pending_commits
             .get(&or.d_req)
             .unwrap_or(&Vec::new())
             .into_iter()
             .filter(|commit| commit.or == *or)
-            .map(|commit| commit.j)
-            .collect::<HashSet<signed::Public>>();
-        commit_set.insert(z.me.clone());
+            .map(|commit| commit.clone())
+            .collect::<HashSet<CommitMessage>>();
         zs.pending_commits.remove(&or.d_req);
 
         let (tx_commit, rx_commit) = mpsc::channel();
@@ -295,15 +297,16 @@ fn check_and_execute_request(
             println!("Sent COMMIT!");
         });
 
-        while commit_set.len() <= z.max_failures as usize {
+        while commit_cert.len() <= z.max_failures as usize - 1 {
             let commit = rx_commit.recv().unwrap();
             if commit.or == *or {
-                commit_set.insert(commit.j);
+                commit_cert.insert(commit);
             }
         }
 
         let mut zs1 = z.state.lock().unwrap();
         zs1.reqs_without_commits.remove(&or.d_req);
+        zs1.last_cc = commit_cert;
     } else {
         drop(zs);
     }
@@ -432,6 +435,7 @@ pub fn start_zeno(
             pending_ors: Vec::new(),
             pending_commits: HashMap::new(),
             apply_tx: apply_tx,
+            last_cc: HashSet::new(),
         })),
     };
     Network::new(

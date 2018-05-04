@@ -1,5 +1,6 @@
 use digest::HashDigest;
 use signed;
+use std::collections::HashSet;
 use std::vec::Vec;
 
 use signed::Signed;
@@ -29,7 +30,7 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
-type CommitCertificate = Vec<CommitMessage>;
+pub type CommitCertificate = HashSet<CommitMessage>;
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct RequestMessage {
