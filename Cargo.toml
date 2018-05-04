@@ -13,3 +13,6 @@ sodiumoxide = "0.0.16"
 bufstream = "0.1"
 scoped_threadpool = "0.1.9"
 chrono = "0.4"
+
+[lib]
+doctest = false
