@@ -475,6 +475,7 @@ mod tests {
     use std::collections::HashMap;
     use std::net::TcpListener;
     use std::sync::mpsc;
+    use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
     use zeno_client;
@@ -617,18 +618,47 @@ mod tests {
     fn test_one_client_strong_consistency() {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
 
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls,
+            vec![vec![1]; 100],
+            Some((1..101).map(|x| vec![x]).collect()),
+            1,
+            true,
+        );
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+    }
+
+    fn do_ops_as_new_client(
+        pubkeys_to_urls: HashMap<signed::Public, String>,
+        ops: Vec<Vec<u8>>,
+        expected: Option<Vec<Vec<u8>>>,
+        max_failures: u64,
+        strong: bool,
+    ) -> Receiver<()> {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             // give the servers some time to know each other
             // TODO: detect stabilization rather than sleep
             thread::sleep(time::Duration::new(2, 0));
-            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls, 1);
-            for i in 1..101 {
-                assert_eq!(c.request(vec![1], true), vec![i]);
+            let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls, max_failures);
+            for (i, op) in ops.into_iter().enumerate() {
+                let result = c.request(op, strong);
+                if let Some(e) = expected.as_ref() {
+                    assert_eq!(e[i], result);
+                }
             }
             tx.send(()).unwrap();
         });
-        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+        return rx;
+    }
+
+    // waits on a bunch of channels, rxs
+    // asserts that no channel takes longer than timeout
+    fn wait_on_all(rxs: Vec<Receiver<()>>, timeout: time::Duration) {
+        let start = time::Instant::now();
+        for rx in rxs {
+            assert_eq!(rx.recv_timeout(timeout - start.elapsed()), Ok(()));
+        }
     }
 
     #[test]
@@ -637,25 +667,23 @@ mod tests {
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
-            let (tx, rx) = mpsc::channel();
-            client_rxs.push(rx);
-            let pubkeys_to_urls1 = pubkeys_to_urls.clone();
-            thread::spawn(move || {
-                // give the servers some time to know each other
-                // TODO: detect stabilization rather than sleep
-                thread::sleep(time::Duration::new(2, 0));
-                let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls1, 1);
-                for _ in 0..20 {
-                    c.request(vec![1], true);
-                }
-                tx.send(()).unwrap();
-            });
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
         }
-        let start = time::Instant::now();
-        let total_timeout = time::Duration::from_secs(30);
-        for rx in client_rxs {
-            assert_eq!(rx.recv_timeout(total_timeout - start.elapsed()), Ok(()));
-        }
+        wait_on_all(client_rxs, time::Duration::from_secs(30));
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
     }
 
     fn test_input_output(
@@ -669,25 +697,13 @@ mod tests {
         let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
-            let (tx, rx) = mpsc::channel();
-            client_rxs.push(rx);
-            let input1 = input.clone();
-            let output1 = output.clone();
-            let pubkeys_to_urls1 = pubkeys_to_urls.clone();
-            thread::spawn(move || {
-                // give the servers some time to know each other
-                // TODO: detect stabilization rather than sleep
-                thread::sleep(time::Duration::new(2, 0));
-                let mut c = zeno_client::Client::new(
-                    signed::gen_keys(),
-                    pubkeys_to_urls1,
-                    max_failures as u64,
-                );
-                for i in 0..input1.len() {
-                    assert_eq!(c.request(input1[i].clone(), strong), output1[i]);
-                }
-                tx.send(()).unwrap();
-            });
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                input.clone(),
+                Some(output.clone()),
+                max_failures as u64,
+                strong,
+            ));
         }
         let start = time::Instant::now();
         let total_timeout = time::Duration::from_secs(30);
