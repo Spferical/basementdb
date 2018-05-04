@@ -452,7 +452,7 @@ mod tests {
     use super::start_zeno;
     use signed;
     use std::collections::HashMap;
-    use std::process::id;
+    use std::net::TcpListener;
     use std::sync::mpsc;
     use std::thread;
     use std::time;
@@ -460,40 +460,33 @@ mod tests {
 
     #[test]
     fn test_one_message() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 24440, false);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, false);
     }
 
     #[test]
     fn test_one_message_strong() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 24450, true);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, true);
     }
 
     #[test]
     fn test_many_messages() {
-        test_one_client(
-            vec![vec![1], vec![2]],
-            vec![vec![1], vec![2]],
-            4,
-            1,
-            24460,
-            false,
-        );
+        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, false);
     }
 
     #[test]
     fn test_many_messages_strong() {
-        test_one_client(
-            vec![vec![1], vec![2]],
-            vec![vec![1], vec![2]],
-            4,
-            1,
-            24470,
-            true,
-        );
+        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, true);
     }
 
-    fn port_adj(port_num: usize) -> usize {
-        port_num + id() as usize
+    fn port_adj() -> u16 {
+        loop {
+            let a = TcpListener::bind("127.0.0.1:0");
+            if a.is_ok() {
+                return a.unwrap().local_addr().unwrap().port();
+            } else {
+                drop(a);
+            }
+        }
     }
 
     fn test_one_client(
@@ -501,12 +494,11 @@ mod tests {
         output: Vec<Vec<u8>>,
         num_servers: usize,
         max_failures: usize,
-        first_port: usize,
         strong: bool,
     ) {
         let mut urls = Vec::new();
         for i in 0..num_servers {
-            urls.push(format!("127.0.0.1:{}", port_adj(first_port + i)));
+            urls.push(format!("127.0.0.1:{}", port_adj()));
         }
         let mut pubkeys_to_urls = HashMap::new();
         let mut keypairs: Vec<signed::KeyPair> = Vec::new();

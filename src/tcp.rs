@@ -377,6 +377,7 @@ mod tests {
     use message::{Message, TestMessage, UnsignedMessage};
     use signed;
     use std::collections::HashMap;
+    use std::net::TcpListener;
     use std::process::id;
     use std::sync::{Arc, Mutex};
 
@@ -389,8 +390,15 @@ mod tests {
         None
     }
 
-    fn port_adj(port_num: usize) -> usize {
-        port_num + id() as usize
+    fn port_adj() -> u16 {
+        loop {
+            let a = TcpListener::bind("127.0.0.1:0");
+            if a.is_ok() {
+                return a.unwrap().local_addr().unwrap().port();
+            } else {
+                drop(a);
+            }
+        }
     }
 
     #[test]
@@ -401,8 +409,8 @@ mod tests {
         let (public1, _) = signed::gen_keys();
         let (public2, _) = signed::gen_keys();
 
-        let ip1 = format!("127.0.0.1:{}", port_adj(24321));
-        let ip2 = format!("127.0.0.1:{}", port_adj(24320));
+        let ip1 = format!("127.0.0.1:{}", port_adj());
+        let ip2 = format!("127.0.0.1:{}", port_adj());
 
         let mut signed_ip_map_1: HashMap<signed::Public, String> = HashMap::new();
         let mut signed_ip_map_2: HashMap<signed::Public, String> = HashMap::new();
