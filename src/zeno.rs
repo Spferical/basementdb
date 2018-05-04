@@ -463,22 +463,29 @@ mod tests {
 
     #[test]
     fn test_one_message() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, false);
+        test_input_output(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, false, 1);
     }
 
     #[test]
     fn test_one_message_strong() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, true);
+        test_input_output(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, true, 1);
     }
 
     #[test]
-    fn test_many_messages() {
-        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, false);
+    fn test_multiple_messages() {
+        test_input_output(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, false, 1);
+    }
+
+    #[test]
+    fn test_multiple_messages_strong() {
+        test_input_output(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, true, 1);
     }
 
     #[test]
     fn test_many_messages_strong() {
-        test_one_client(vec![vec![1], vec![2]], vec![vec![1], vec![2]], 4, 1, true);
+        let input : Vec<_> = (0..100).map(|i| vec![i]).collect();
+        let output = input.clone();
+        test_input_output(input, output, 4, 1, true, 1);
     }
 
     fn port_adj() -> u16 {
@@ -492,12 +499,13 @@ mod tests {
         }
     }
 
-    fn test_one_client(
+    fn test_input_output(
         input: Vec<Vec<u8>>,
         output: Vec<Vec<u8>>,
         num_servers: usize,
         max_failures: usize,
         strong: bool,
+        num_clients: usize,
     ) {
         let mut urls = Vec::new();
         for i in 0..num_servers {
@@ -517,7 +525,6 @@ mod tests {
             let (tx, rx) = mpsc::channel();
             let mut zeno_pkeys_to_urls = pubkeys_to_urls.clone();
             zeno_pkeys_to_urls.remove(&keypairs[i].0);
-            assert!(zeno_pkeys_to_urls.len() == 3);
             zenos.push(start_zeno(
                 urls[i].clone(),
                 keypairs[i].clone(),
@@ -540,22 +547,36 @@ mod tests {
                 }
             });
         }
-        let (tx, rx) = mpsc::channel();
-        let t = thread::spawn(move || {
-            // give the servers some time to know each other
-            // TODO: detect stabilization rather than sleep
-            thread::sleep(time::Duration::new(2, 0));
-            let mut c = zeno_client::Client::new(
-                signed::gen_keys(),
-                pubkeys_to_urls.clone(),
-                max_failures as u64,
-            );
-            for i in 0..input.len() {
-                assert_eq!(c.request(input[i].clone(), strong), output[i]);
-            }
-            tx.send(()).unwrap();
-        });
-        assert_eq!(rx.recv_timeout(time::Duration::from_secs(30)), Ok(()));
-        t.join().unwrap();
+        let mut client_rxs = Vec::new();
+        let mut client_threads = Vec::new();
+        for _ in 0..num_clients {
+            let (tx, rx) = mpsc::channel();
+            client_rxs.push(rx);
+            let input1 = input.clone();
+            let output1 = output.clone();
+            let pubkeys_to_urls1 = pubkeys_to_urls.clone();
+            client_threads.push(thread::spawn(move || {
+                // give the servers some time to know each other
+                // TODO: detect stabilization rather than sleep
+                thread::sleep(time::Duration::new(2, 0));
+                let mut c = zeno_client::Client::new(
+                    signed::gen_keys(),
+                    pubkeys_to_urls1,
+                    max_failures as u64,
+                );
+                for i in 0..input1.len() {
+                    assert_eq!(c.request(input1[i].clone(), strong), output1[i]);
+                }
+                tx.send(()).unwrap();
+            }));
+        }
+        let start = time::Instant::now();
+        let total_timeout = time::Duration::from_secs(30);
+        for rx in client_rxs {
+            assert_eq!(rx.recv_timeout(total_timeout - start.elapsed()), Ok(()));
+        }
+        for t in client_threads {
+            t.join().unwrap();
+        }
     }
 }
