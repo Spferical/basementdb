@@ -377,6 +377,7 @@ mod tests {
     use message::{Message, TestMessage, UnsignedMessage};
     use signed;
     use std::collections::HashMap;
+    use std::process::id;
     use std::sync::{Arc, Mutex};
 
     struct TestState {
@@ -388,6 +389,10 @@ mod tests {
         None
     }
 
+    fn port_adj(port_num: usize) -> usize {
+        port_num + id() as usize
+    }
+
     #[test]
     fn two_network_send() {
         let test_state1 = Arc::new(Mutex::new(TestState { state: 0 }));
@@ -396,8 +401,8 @@ mod tests {
         let (public1, _) = signed::gen_keys();
         let (public2, _) = signed::gen_keys();
 
-        let ip1 = "127.0.0.1:54321";
-        let ip2 = "127.0.0.1:54320";
+        let ip1 = format!("127.0.0.1:{}", port_adj(24321));
+        let ip2 = format!("127.0.0.1:{}", port_adj(24320));
 
         let mut signed_ip_map_1: HashMap<signed::Public, String> = HashMap::new();
         let mut signed_ip_map_2: HashMap<signed::Public, String> = HashMap::new();

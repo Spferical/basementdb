@@ -452,6 +452,7 @@ mod tests {
     use super::start_zeno;
     use signed;
     use std::collections::HashMap;
+    use std::process::id;
     use std::sync::mpsc;
     use std::thread;
     use std::time;
@@ -459,12 +460,12 @@ mod tests {
 
     #[test]
     fn test_one_message() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44440, false);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 24440, false);
     }
 
     #[test]
     fn test_one_message_strong() {
-        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 44450, true);
+        test_one_client(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, 24450, true);
     }
 
     #[test]
@@ -474,7 +475,7 @@ mod tests {
             vec![vec![1], vec![2]],
             4,
             1,
-            44460,
+            24460,
             false,
         );
     }
@@ -486,9 +487,13 @@ mod tests {
             vec![vec![1], vec![2]],
             4,
             1,
-            44470,
+            24470,
             true,
         );
+    }
+
+    fn port_adj(port_num: usize) -> usize {
+        port_num + id() as usize
     }
 
     fn test_one_client(
@@ -501,7 +506,7 @@ mod tests {
     ) {
         let mut urls = Vec::new();
         for i in 0..num_servers {
-            urls.push(format!("127.0.0.1:{}", first_port + i));
+            urls.push(format!("127.0.0.1:{}", port_adj(first_port + i)));
         }
         let mut pubkeys_to_urls = HashMap::new();
         let mut keypairs: Vec<signed::KeyPair> = Vec::new();
