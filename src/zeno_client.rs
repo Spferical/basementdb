@@ -58,9 +58,9 @@ impl Client {
         let um = UnsignedMessage::Request(rm);
         let s = signed::Signed::new(um, &self.keypair.1);
         let m = message::Message::Signed(s);
-        let mut responses = HashMap::new();
         loop {
-            for (_target, resp) in self.net.send_to_all_and_recv(m.clone()).recv() {
+            let mut responses = HashMap::new();
+            for (_target, resp) in self.net.send_to_all_and_recv(m.clone()).iter() {
                 if let Ok(resp_msg) = resp {
                     match self.get_data(resp_msg) {
                         Some(data) => {
