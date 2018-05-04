@@ -461,6 +461,25 @@ mod tests {
     use std::time;
     use zeno_client;
 
+    trait TestApp {
+        fn new() -> Self;
+
+        fn apply(&mut self, input: ApplyMsg) -> Vec<u8>;
+    }
+
+    struct EchoApp;
+    impl TestApp for EchoApp {
+        fn new() -> EchoApp {
+            EchoApp{}
+        }
+        fn apply(&mut self, input: ApplyMsg) -> Vec<u8> {
+            match input {
+                ApplyMsg::Apply(x) => x,
+            }
+        }
+    }
+
+
     #[test]
     fn test_one_message() {
         test_input_output(vec![vec![1, 2, 3]], vec![vec![1, 2, 3]], 4, 1, false, 1);
@@ -499,7 +518,7 @@ mod tests {
         }
     }
 
-    fn start_zenos(
+    fn start_zenos<T: TestApp>(
         num_servers: usize,
         max_failures: usize,
     ) -> (HashMap<signed::Public, String>) {
@@ -530,13 +549,12 @@ mod tests {
                 max_failures as u64,
             ));
             thread::spawn(move || {
+                let mut app = T::new();
                 loop {
                     // simple echo application
                     match rx.recv() {
-                        Ok((app_msg, tx)) => match app_msg {
-                            ApplyMsg::Apply(x) => {
-                                tx.send(x).ok();
-                            }
+                        Ok((app_msg, tx)) => {
+                            tx.send(app.apply(app_msg)).ok();
                         },
                         Err(_) => break,
                     }
@@ -554,7 +572,7 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let pubkeys_to_urls = start_zenos(num_servers, max_failures);
+        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             let (tx, rx) = mpsc::channel();
