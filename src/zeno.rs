@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::thread;
 
 use digest;
@@ -91,27 +91,13 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req {
         let or = zs.pending_ors.remove(0);
-        match check_and_execute_request(z, &mut zs, &or, m, net) {
-            Some(rx) => {
-                drop(zs);
-                let app_resp = rx.recv().unwrap();
-                Some(generate_client_response(z, app_resp, &or, m))
-            }
-            None => None,
-        }
+        check_and_execute_request(z, &mut zs, &or, m, net)
     } else {
         match zs.status {
             ZenoStatus::Primary => {
                 let or_opt = order_message(z, &mut zs, m, net);
                 match or_opt {
-                    Some(or) => match check_and_execute_request(z, &mut zs, &or, m, net) {
-                        Some(rx) => {
-                            drop(zs);
-                            let app_resp = rx.recv().unwrap();
-                            Some(generate_client_response(z, app_resp, &or, m))
-                        }
-                        None => None,
-                    },
+                    Some(or) => check_and_execute_request(z, &mut zs, &or, m, net),
                     None => None,
                 }
             }
@@ -121,14 +107,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
                 drop(zs);
                 let or = rx.recv().unwrap();
                 let mut zs = z.state.lock().unwrap();
-                match check_and_execute_request(z, &mut zs, &or, m, net) {
-                    Some(rx) => {
-                        drop(zs);
-                        let app_resp = rx.recv().unwrap();
-                        Some(generate_client_response(z, app_resp, &or, m))
-                    }
-                    None => None,
-                }
+                check_and_execute_request(z, &mut zs, &or, m, net)
             }
         }
     }
@@ -231,18 +210,18 @@ fn generate_client_response(
 fn check_and_execute_request(
     z: &Zeno,
     zs: &mut ZenoState,
-    om: &OrderedRequestMessage,
+    or: &OrderedRequestMessage,
     msg: &RequestMessage,
     _net: &Network,
-) -> Option<Receiver<Vec<u8>>> {
+) -> Option<Message> {
     z_debug!(z, "Executing request!");
     // check valid view
-    if om.v != zs.v as u64 {
-        z_debug!(z, "Invalid view number: {} != {}", om.v, zs.v);
+    if or.v != zs.v as u64 {
+        z_debug!(z, "Invalid view number: {} != {}", or.v, zs.v);
         return None;
     }
     // check valid sequence number
-    if om.n as i64 > zs.n + 1 {
+    if or.n as i64 > zs.n + 1 {
         unimplemented!("got sequence numbers out-of-order");
     }
     // check history digest
@@ -251,12 +230,12 @@ fn check_and_execute_request(
         None => m_digest,
         Some(h_n_minus_1) => digest::d((h_n_minus_1, m_digest)),
     };
-    if history_digest != om.h {
+    if history_digest != or.h {
         z_debug!(
             z,
             "History digests don't match: {:?} {:?}",
             history_digest,
-            om.h
+            or.h
         );
         unimplemented!("History digests don't match");
     }
@@ -275,7 +254,9 @@ fn check_and_execute_request(
     assert!(zs.all_requests.len() - 1 == zs.n as usize);
 
     zs.h.push(history_digest);
-    Some(rx)
+    drop(zs);
+    let app_resp = rx.recv().unwrap();
+    Some(generate_client_response(z, app_resp, &or, msg))
 }
 
 fn on_ordered_request(z: &Zeno, om: OrderedRequestMessage, _net: Network) {
