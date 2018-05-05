@@ -104,7 +104,8 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
         return Some(zs.replies.get(&m.c).unwrap().clone().unwrap());
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
-        && zs.pending_ors[0].n == (zs.n + 1) as u64 {
+        && zs.pending_ors[0].n == (zs.n + 1) as u64
+    {
         let or = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &or, m, net)
     } else {
@@ -319,7 +320,8 @@ fn check_and_execute_request(
 
         let mut zs1 = z.state.lock().unwrap();
         zs1.reqs_without_commits.remove(&or.d_req);
-        zs1.last_cc = commit_cert;
+        zs1.last_cc = commit_cert.into_iter().collect();
+        zs1.last_cc.sort_by(|ref a, ref b| a.j.cmp(&(b.j)));
     } else {
         drop(zs);
     }
@@ -457,7 +459,7 @@ pub fn start_zeno(
             pending_ors: Vec::new(),
             pending_commits: HashMap::new(),
             apply_tx: apply_tx,
-            last_cc: HashSet::new(),
+            last_cc: Vec::new(),
         })),
     };
     Network::new(
