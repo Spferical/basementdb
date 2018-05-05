@@ -50,7 +50,7 @@ def run_test(test, invocation_number, num_executions, stagger):
     return success
 
 
-def run_tests(test='2A', num_executions=500, num_concurrent=8, total_stagger=0):
+def run_tests(test='', num_executions=500, num_concurrent=8, total_stagger=0):
     with Pool(processes=num_concurrent) as pool:
         pauses = [total_stagger * (i / num_concurrent) *
                   (1 if i < num_concurrent else 0)
