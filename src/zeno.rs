@@ -384,6 +384,14 @@ fn check_and_execute_request(
 
 fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
     let zs = &mut *z.state.lock().unwrap();
+    if or.v != zs.v {
+        z_debug!(z, "Ignoring OR from v:{} because v is {}", or.v, zs.v);
+        return;
+    }
+    if or.i != z.pubkeys[zs.v % z.pubkeys.len()] {
+        z_debug!(z, "Ignoring OR from wrong primary for this view");
+        return;
+    }
     match zs.reqs_without_ors.remove(&or.d_req) {
         Some(tx) => {
             if or.n == (zs.n + 1) as u64 {
