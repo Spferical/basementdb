@@ -106,7 +106,7 @@ pub struct TestMessage {
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct IHateThePrimaryMessage {
     pub v: u64,
-    pub i: u64,
+    pub i: signed::Public,
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
@@ -114,7 +114,7 @@ pub struct ViewChangeMessage {
     pub v: u64,
     pub cc: CommitCertificate,
     pub o: Vec<Signed<OrderedRequestMessage>>,
-    pub i: u64,
+    pub i: signed::Public,
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]

@@ -7,16 +7,19 @@ use std::sync::MutexGuard;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
 
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
               ConcreteClientResponseMessage, Message, OrderedRequestMessage, RequestMessage,
-              UnsignedMessage};
+              UnsignedMessage, IHateThePrimaryMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
+
+const IHATETHEPRIMARY_TIMEOUT : Duration = Duration::from_secs(30);
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
@@ -46,12 +49,18 @@ struct ZenoState {
 
     // See 4.3
     n: i64,
-    v: i64,
+    v: u64,
     h: HashChain,
-    requests: HashMap<signed::Public, Vec<usize>>,
+    // highest timestamp we've received from given client
+    highest_t_received: HashMap<signed::Public, u64>,
+    // all requests we've executed for each client
+    // (index in all_executed_reqs)
+    executed_reqs: HashMap<signed::Public, Vec<usize>>,
+    // the latest client response we've sent to each client
     replies: HashMap<signed::Public, Option<Message>>,
 
-    all_requests: Vec<RequestMessage>,
+    // all client requests we've executed, in order
+    all_executed_reqs: Vec<RequestMessage>,
 
     // channels for threads handling requests without ORs
     reqs_without_ors: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
@@ -66,6 +75,9 @@ struct ZenoState {
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 
     last_cc: CommitCertificate,
+
+    ihatetheprimary_timer_stopper: Option<Sender<()>>,
+    ihatetheprimary_accusations: u64,
 }
 
 /// represents the entire state of our zeno server
@@ -78,13 +90,20 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
+fn already_received_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
+    match zs.highest_t_received.get(&msg.c) {
+        Some(&t) => msg.t <= t,
+        None => false,
+    }
+}
+
 /// returns whether we've already handled the given client request already
-/// (specifically, whether the last request in zs.all_requests is newer than
+/// (specifically, whether the last request in zs.all_executed_reqs is newer than
 /// msg)
 fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
-    match zs.requests.get(&msg.c) {
+    match zs.executed_reqs.get(&msg.c) {
         Some(reqs) => match reqs.last() {
-            Some(&last_req_n) => zs.all_requests[last_req_n].t >= msg.t,
+            Some(&last_req_n) => zs.all_executed_reqs[last_req_n].t >= msg.t,
             None => false,
         },
         None => false,
@@ -96,12 +115,45 @@ fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Messa
     Message::Signed(Signed::new(msg, priv_key))
 }
 
+fn start_ihatetheprimary_timer (z: &Zeno, zs: &mut ZenoState, net: &Network) {
+    let (tx, rx) = mpsc::channel();
+    zs.ihatetheprimary_timer_stopper = Some(tx);
+    let z1 = z.clone();
+    let net1 = net.clone();
+    thread::spawn(move || {
+         match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
+             Err(_) => {
+                 let mut zs1 = z1.state.lock().unwrap();
+                 zs1.ihatetheprimary_accusations += 1;
+
+                 let msg = get_signed_message(
+                     UnsignedMessage::IHateThePrimary(
+                         IHateThePrimaryMessage {v: zs1.v, i: z1.me}),
+                     &z1.private_me);
+                 let z2 = z1.clone();
+                 thread::spawn(move || {
+                     let res_map = net1.send_to_all(msg);
+                     for (_key, val) in res_map {
+                         val.ok();
+                     }
+                     z_debug!(z2, "Broadcasted IHATETHEPRIMARY!");
+                });
+             },
+             _ => {},
+         }
+    });
+}
+
 /// given a client request, does lots of stuff
 fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
-    if already_handled_msg(&zs, m) {
-        return zs.replies.get(&m.c).unwrap().clone();
+    if already_received_msg(&zs, m) {
+        if already_handled_msg(&zs, m) {
+            return zs.replies.get(&m.c).unwrap().clone();
+        } else {
+            start_ihatetheprimary_timer(z, &mut zs, net);
+        }
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
         && zs.pending_ors[0].n == (zs.n + 1) as u64
@@ -141,13 +193,13 @@ fn order_message(
 ) -> Option<OrderedRequestMessage> {
     let last_t: i64;
 
-    zs.requests.entry(m.c).or_insert_with(Vec::new);
-    assert!(zs.all_requests.len() == (zs.n + 1) as usize);
+    zs.executed_reqs.entry(m.c).or_insert_with(Vec::new);
+    assert!(zs.all_executed_reqs.len() == (zs.n + 1) as usize);
 
-    if zs.requests[&m.c].len() > 0 {
-        let last_req_option = zs.requests[&m.c].last();
+    if zs.executed_reqs[&m.c].len() > 0 {
+        let last_req_option = zs.executed_reqs[&m.c].last();
         let last_req = last_req_option.unwrap();
-        last_t = zs.all_requests[*last_req].t as i64;
+        last_t = zs.all_executed_reqs[*last_req].t as i64;
     } else {
         last_t = -1;
     }
@@ -265,11 +317,11 @@ fn check_and_execute_request(
 
     zs.n += 1;
     z_debug!(z, "Executed request {}", zs.n);
-    zs.all_requests.push(msg.clone());
-    zs.requests.entry(msg.c).or_insert_with(Vec::new);
+    zs.all_executed_reqs.push(msg.clone());
+    zs.executed_reqs.entry(msg.c).or_insert_with(Vec::new);
     let n = zs.n as usize;
-    zs.requests.get_mut(&msg.c).unwrap().push(n);
-    assert!(zs.all_requests.len() - 1 == zs.n as usize);
+    zs.executed_reqs.get_mut(&msg.c).unwrap().push(n);
+    assert!(zs.all_executed_reqs.len() - 1 == zs.n as usize);
     zs.h.push(history_digest);
 
     // if we already have a next request queued, let that thread know
@@ -446,20 +498,23 @@ pub fn start_zeno(
             n: -1,
             v: 0,
             h: Vec::new(),
-            requests: HashMap::new(),
+            highest_t_received: HashMap::new(),
+            executed_reqs: HashMap::new(),
             replies: HashMap::new(),
             status: if primary {
                 ZenoStatus::Primary
             } else {
                 ZenoStatus::Replica
             },
-            all_requests: Vec::new(),
+            all_executed_reqs: Vec::new(),
             reqs_without_ors: HashMap::new(),
             reqs_without_commits: HashMap::new(),
             pending_ors: Vec::new(),
             pending_commits: HashMap::new(),
             apply_tx: apply_tx,
             last_cc: Vec::new(),
+            ihatetheprimary_timer_stopper: None,
+            ihatetheprimary_accusations: 0,
         })),
     };
     Network::new(
