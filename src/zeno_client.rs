@@ -62,6 +62,7 @@ impl Client {
             let mut responses = HashMap::new();
             for (_target, resp) in self.net.send_to_all_and_recv(m.clone()).iter() {
                 if let Ok(resp_msg) = resp {
+                    // TODO: verify messages match in v, n, h, r, and OR
                     match self.get_data(resp_msg) {
                         Some(data) => {
                             let num = responses.entry(data.clone()).or_insert(0);
