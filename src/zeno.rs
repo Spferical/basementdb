@@ -101,7 +101,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
     if already_handled_msg(&zs, m) {
-        return Some(zs.replies.get(&m.c).unwrap().clone().unwrap());
+        return zs.replies.get(&m.c).unwrap().clone();
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
         && zs.pending_ors[0].n == (zs.n + 1) as u64
