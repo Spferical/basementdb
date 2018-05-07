@@ -70,7 +70,7 @@ struct ZenoState {
     last_cc: CommitCertificate,
 
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
-    ihatetheprimary_accusations: u64,
+    ihatetheprimary_accusations: HashSet<signed::Public>,
 }
 
 fn get_primary(zs: &ZenoState) -> signed::Public {
@@ -125,7 +125,7 @@ fn start_ihatetheprimary_timer (z: &Zeno, zs: &mut ZenoState, net: &Network) {
          match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
              Err(_) => {
                  let mut zs1 = z1.state.lock().unwrap();
-                 zs1.ihatetheprimary_accusations += 1;
+                 zs1.ihatetheprimary_accusations.insert(z1.me);
 
                  let msg = get_signed_message(
                      UnsignedMessage::IHateThePrimary(
@@ -513,7 +513,7 @@ pub fn start_zeno(
             apply_tx: apply_tx,
             last_cc: Vec::new(),
             ihatetheprimary_timer_stopper: None,
-            ihatetheprimary_accusations: 0,
+            ihatetheprimary_accusations: HashSet::new(),
         })),
     };
     Network::new(
