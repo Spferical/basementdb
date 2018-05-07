@@ -32,12 +32,6 @@ macro_rules! z_debug {
     };
 }
 
-#[allow(dead_code)]
-enum ZenoStatus {
-    Replica,
-    Primary,
-}
-
 pub enum ApplyMsg {
     Apply(Vec<u8>),
 }
@@ -71,13 +65,20 @@ struct ZenoState {
     // COMMITs received for requests we haven't gotten yet
     pending_commits: HashMap<HashDigest, Vec<CommitMessage>>,
 
-    status: ZenoStatus,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 
     last_cc: CommitCertificate,
 
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
     ihatetheprimary_accusations: u64,
+}
+
+fn get_primary(zs: &ZenoState) -> signed::Public {
+    zs.pubkeys[zs.v as usize % zs.pubkeys.len()]
+}
+
+fn is_primary(z: &Zeno, zs: &ZenoState) -> bool {
+    get_primary(zs) == z.me
 }
 
 /// represents the entire state of our zeno server
@@ -161,23 +162,20 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
         let or = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &or, m, net)
     } else {
-        match zs.status {
-            ZenoStatus::Primary => {
-                let or_opt = order_message(z, &mut zs, m, net);
-                match or_opt {
-                    Some(or) => check_and_execute_request(z, zs, &or, m, net),
-                    None => None,
-                }
+        if is_primary(z, &zs) {
+            let or_opt = order_message(z, &mut zs, m, net);
+            match or_opt {
+                Some(or) => check_and_execute_request(z, zs, &or, m, net),
+                None => None,
             }
-            ZenoStatus::Replica => {
-                let (tx, rx) = mpsc::channel();
-                zs.reqs_without_ors.insert(d_req.clone(), tx);
-                drop(zs);
-                let or = rx.recv().unwrap();
-                let mut zs = z.state.lock().unwrap();
-                zs.reqs_without_ors.remove(&d_req);
-                check_and_execute_request(z, zs, &or, m, net)
-            }
+        } else {
+            let (tx, rx) = mpsc::channel();
+            zs.reqs_without_ors.insert(d_req.clone(), tx);
+            drop(zs);
+            let or = rx.recv().unwrap();
+            let mut zs = z.state.lock().unwrap();
+            zs.reqs_without_ors.remove(&d_req);
+            check_and_execute_request(z, zs, &or, m, net)
         }
     }
 }
@@ -388,7 +386,7 @@ fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
         z_debug!(z, "Ignoring OR from v:{} because v is {}", or.v, zs.v);
         return;
     }
-    if or.i != z.pubkeys[zs.v % z.pubkeys.len()] {
+    if or.i != get_primary(zs) {
         z_debug!(z, "Ignoring OR from wrong primary for this view");
         return;
     }
@@ -487,33 +485,26 @@ impl Zeno {
 pub fn start_zeno(
     url: String,
     kp: signed::KeyPair,
+    pubkeys: Vec<signed::Public>,
     pubkeys_to_url: HashMap<signed::Public, String>,
-    primary: bool,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
     max_failures: u64,
 ) -> Zeno {
+    let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
+    pubkeys_to_url_without_me.remove(&kp.0);
     let zeno = Zeno {
         url: url.clone(),
         me: kp.clone().0,
         private_me: kp.clone().1,
         max_failures: max_failures,
         state: Arc::new(Mutex::new(ZenoState {
-            pubkeys: pubkeys_to_url
-                .keys()
-                .filter(|&&p| p != kp.0)
-                .map(|p| p.clone())
-                .collect(),
+            pubkeys: pubkeys,
             n: -1,
             v: 0,
             h: Vec::new(),
             highest_t_received: HashMap::new(),
             executed_reqs: HashMap::new(),
             replies: HashMap::new(),
-            status: if primary {
-                ZenoStatus::Primary
-            } else {
-                ZenoStatus::Replica
-            },
             all_executed_reqs: Vec::new(),
             reqs_without_ors: HashMap::new(),
             reqs_without_commits: HashMap::new(),
@@ -527,7 +518,7 @@ pub fn start_zeno(
     };
     Network::new(
         url,
-        pubkeys_to_url,
+        pubkeys_to_url_without_me,
         Some((Zeno::handle_message, zeno.clone())),
     );
     zeno
@@ -654,13 +645,11 @@ mod tests {
         let mut zenos = Vec::new();
         for i in 0..num_servers {
             let (tx, rx) = mpsc::channel();
-            let mut zeno_pkeys_to_urls = pubkeys_to_urls.clone();
-            zeno_pkeys_to_urls.remove(&keypairs[i].0);
             zenos.push(start_zeno(
                 urls[i].clone(),
                 keypairs[i].clone(),
-                zeno_pkeys_to_urls,
-                i == 0,
+                keypairs.iter().map(|kp| kp.0).collect(),
+                pubkeys_to_urls.clone(),
                 tx,
                 max_failures as u64,
             ));
