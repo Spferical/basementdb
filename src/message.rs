@@ -119,7 +119,10 @@ pub struct ViewChangeMessage {
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
-pub struct NewViewMessage {}
+pub struct NewViewMessage {
+    pub v: u64,
+    pub p: Vec<ViewChangeMessage>,
+}
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ViewConfirmMessage {}
 

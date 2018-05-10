@@ -13,8 +13,8 @@ use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
-              ConcreteClientResponseMessage, IHateThePrimaryMessage, Message,
-              OrderedRequestMessage, RequestMessage, UnsignedMessage};
+              ConcreteClientResponseMessage, IHateThePrimaryMessage, Message, NewViewMessage,
+              OrderedRequestMessage, RequestMessage, UnsignedMessage, ViewChangeMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -77,8 +77,10 @@ struct ZenoState {
 
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
     ihatetheprimary_accusations: HashSet<signed::Public>,
-    view_changes: HashSet<signed::Public>,
+    view_changes: HashMap<signed::Public, ViewChangeMessage>,
     view_state: ViewState,
+
+    new_views: HashMap<signed::Public, NewViewMessage>,
 }
 
 fn get_primary(zs: &ZenoState) -> signed::Public {
@@ -480,6 +482,31 @@ fn on_ihatetheprimary(z: &Zeno, msg: IHateThePrimaryMessage, net: Network) {
     }
 }
 
+fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
+    let zs = &mut *z.state.lock().unwrap();
+    if msg.v == zs.v {
+        zs.view_changes.insert(msg.i, msg);
+        match zs.view_state {
+            ViewState::ViewActive => {
+                if zs.view_changes.len() >= z.max_failures as usize * 2 + 1 {
+                    if is_primary(z, zs) {
+                        let msg = Message::Signed(Signed::new(
+                            UnsignedMessage::NewView(NewViewMessage {
+                                v: zs.v,
+                                p: zs.view_changes.values().cloned().collect(),
+                            }),
+                            &z.private_me,
+                        ));
+                        //TODO: convert to new view
+                        broadcast(net, msg);
+                    }
+                }
+            }
+            ViewState::ViewChanging => {}
+        }
+    }
+}
+
 impl Zeno {
     pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
         match m.clone().base {
@@ -488,6 +515,7 @@ impl Zeno {
             UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
             UnsignedMessage::Commit(cm) => m.verify(&cm.j),
             UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
+            UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
             _ => None,
         }
     }
@@ -519,6 +547,13 @@ impl Zeno {
                 on_ihatetheprimary(self, ihtpm, n);
                 None
             }
+
+            UnsignedMessage::ViewChange(vcm) => {
+                z_debug!(self, "GOT ViewChange");
+                on_viewchange(self, vcm, n);
+                None
+            }
+            //TODO: handle new view
             _ => None,
         }
     }
@@ -572,8 +607,9 @@ pub fn start_zeno(
             last_cc: Vec::new(),
             ihatetheprimary_timer_stopper: None,
             ihatetheprimary_accusations: HashSet::new(),
-            view_changes: HashSet::new(),
+            view_changes: HashMap::new(),
             view_state: ViewState::ViewActive,
+            new_views: HashMap::new(),
         })),
     };
     Network::new(
