@@ -13,13 +13,13 @@ use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
-              ConcreteClientResponseMessage, Message, OrderedRequestMessage, RequestMessage,
-              UnsignedMessage, IHateThePrimaryMessage};
+              ConcreteClientResponseMessage, IHateThePrimaryMessage, Message,
+              OrderedRequestMessage, RequestMessage, UnsignedMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
 
-const IHATETHEPRIMARY_TIMEOUT : Duration = Duration::from_secs(30);
+const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(30);
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
@@ -34,6 +34,12 @@ macro_rules! z_debug {
 
 pub enum ApplyMsg {
     Apply(Vec<u8>),
+}
+
+#[derive(Clone, Copy)]
+enum ViewState {
+    ViewActive,
+    ViewChanging,
 }
 
 /// stores the mutable state of our zeno server
@@ -54,7 +60,7 @@ struct ZenoState {
     replies: HashMap<signed::Public, Option<Message>>,
 
     // all client requests we've executed, in order
-    all_executed_reqs: Vec<RequestMessage>,
+    all_executed_reqs: Vec<(OrderedRequestMessage, RequestMessage)>,
 
     // channels for threads handling requests without ORs
     reqs_without_ors: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
@@ -71,6 +77,8 @@ struct ZenoState {
 
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
     ihatetheprimary_accusations: HashSet<signed::Public>,
+    view_changes: HashSet<signed::Public>,
+    view_state: ViewState,
 }
 
 fn get_primary(zs: &ZenoState) -> signed::Public {
@@ -104,7 +112,7 @@ fn already_received_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
 fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
     match zs.executed_reqs.get(&msg.c) {
         Some(reqs) => match reqs.last() {
-            Some(&last_req_n) => zs.all_executed_reqs[last_req_n].t >= msg.t,
+            Some(&last_req_n) => zs.all_executed_reqs[last_req_n].1.t >= msg.t,
             None => false,
         },
         None => false,
@@ -116,32 +124,34 @@ fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Messa
     Message::Signed(Signed::new(msg, priv_key))
 }
 
-fn start_ihatetheprimary_timer (z: &Zeno, zs: &mut ZenoState, net: &Network) {
+fn broadcast(net: Network, msg: Message) {
+    let res_map = net.send_to_all(msg);
+    for (_key, val) in res_map {
+        val.ok();
+    }
+}
+
+fn start_ihatetheprimary_timer(z: &Zeno, zs: &mut ZenoState, net: &Network) {
     let (tx, rx) = mpsc::channel();
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
     let net1 = net.clone();
-    thread::spawn(move || {
-         match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
-             Err(_) => {
-                 let mut zs1 = z1.state.lock().unwrap();
-                 zs1.ihatetheprimary_accusations.insert(z1.me);
+    thread::spawn(move || match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
+        Err(_) => {
+            let mut zs1 = z1.state.lock().unwrap();
+            zs1.ihatetheprimary_accusations.insert(z1.me);
 
-                 let msg = get_signed_message(
-                     UnsignedMessage::IHateThePrimary(
-                         IHateThePrimaryMessage {v: zs1.v, i: z1.me}),
-                     &z1.private_me);
-                 let z2 = z1.clone();
-                 thread::spawn(move || {
-                     let res_map = net1.send_to_all(msg);
-                     for (_key, val) in res_map {
-                         val.ok();
-                     }
-                     z_debug!(z2, "Broadcasted IHATETHEPRIMARY!");
-                });
-             },
-             _ => {},
-         }
+            let msg = get_signed_message(
+                UnsignedMessage::IHateThePrimary(IHateThePrimaryMessage { v: zs1.v, i: z1.me }),
+                &z1.private_me,
+            );
+            let z2 = z1.clone();
+            thread::spawn(move || {
+                broadcast(net1, msg);
+                z_debug!(z2, "Broadcasted IHATETHEPRIMARY!");
+            });
+        }
+        _ => {}
     });
 }
 
@@ -197,7 +207,7 @@ fn order_message(
     if zs.executed_reqs[&m.c].len() > 0 {
         let last_req_option = zs.executed_reqs[&m.c].last();
         let last_req = last_req_option.unwrap();
-        last_t = zs.all_executed_reqs[*last_req].t as i64;
+        last_t = zs.all_executed_reqs[*last_req].1.t as i64;
     } else {
         last_t = -1;
     }
@@ -315,7 +325,7 @@ fn check_and_execute_request(
 
     zs.n += 1;
     z_debug!(z, "Executed request {}", zs.n);
-    zs.all_executed_reqs.push(msg.clone());
+    zs.all_executed_reqs.push((or.clone(), msg.clone()));
     zs.executed_reqs.entry(msg.c).or_insert_with(Vec::new);
     let n = zs.n as usize;
     zs.executed_reqs.get_mut(&msg.c).unwrap().push(n);
@@ -426,6 +436,50 @@ fn on_commit(z: &Zeno, cm: CommitMessage) {
     }
 }
 
+fn is_view_active(zs: &ZenoState) -> bool {
+    match zs.view_state {
+        ViewState::ViewActive => true,
+        ViewState::ViewChanging => false,
+    }
+}
+
+fn on_ihatetheprimary(z: &Zeno, msg: IHateThePrimaryMessage, net: Network) {
+    let mut zs = z.state.lock().unwrap();
+    if msg.v == zs.v {
+        zs.ihatetheprimary_accusations.insert(msg.i);
+        // switch the view from active to inactive if we've gotten enough
+        if is_view_active(&zs) {
+            let num_accusations = zs.ihatetheprimary_accusations.len();
+            if num_accusations >= z.max_failures as usize + 1 {
+                zs.view_state = ViewState::ViewChanging;
+                zs.v += 1;
+                let o = match zs.last_cc.get(0) {
+                    Some(cm) => {
+                        let last_committed = cm.or.n as usize;
+                        zs.all_executed_reqs[last_committed + 1..]
+                            .iter()
+                            .map(|x| x.0.clone())
+                            .collect()
+                    }
+                    None => Vec::new(),
+                };
+                let msg = Message::Signed(Signed::new(
+                    UnsignedMessage::ViewChange(message::ViewChangeMessage {
+                        v: zs.v,
+                        cc: zs.last_cc.clone(),
+                        o: o,
+                        i: z.me,
+                    }),
+                    &z.private_me,
+                ));
+                thread::spawn(move || {
+                    broadcast(net, msg);
+                });
+            }
+        }
+    }
+}
+
 impl Zeno {
     pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
         match m.clone().base {
@@ -433,6 +487,7 @@ impl Zeno {
             UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
             UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
             UnsignedMessage::Commit(cm) => m.verify(&cm.j),
+            UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
             _ => None,
         }
     }
@@ -459,12 +514,16 @@ impl Zeno {
                 on_commit(self, cm);
                 None
             }
+            UnsignedMessage::IHateThePrimary(ihtpm) => {
+                z_debug!(self, "GOT IHTP");
+                on_ihatetheprimary(self, ihtpm, n);
+                None
+            }
             _ => None,
         }
     }
 
     fn handle_message(self, m: Message, n: Network) -> Option<Message> {
-        z_debug!(self, "handling message: {:?}", m);
         match m {
             Message::Unsigned(um) => self.match_unsigned_message(um, n),
             Message::Signed(sm) => match Zeno::verifier(sm) {
@@ -474,7 +533,6 @@ impl Zeno {
                 }
                 Some(u) => {
                     let ret = self.match_unsigned_message(u, n);
-                    z_debug!(self, "Returning: {:?}", ret);
                     ret
                 }
             },
@@ -514,6 +572,8 @@ pub fn start_zeno(
             last_cc: Vec::new(),
             ihatetheprimary_timer_stopper: None,
             ihatetheprimary_accusations: HashSet::new(),
+            view_changes: HashSet::new(),
+            view_state: ViewState::ViewActive,
         })),
     };
     Network::new(

@@ -113,7 +113,8 @@ pub struct IHateThePrimaryMessage {
 pub struct ViewChangeMessage {
     pub v: u64,
     pub cc: CommitCertificate,
-    pub o: Vec<Signed<OrderedRequestMessage>>,
+    // TODO: each ORM should be signed
+    pub o: Vec<OrderedRequestMessage>,
     pub i: signed::Public,
 }
 
