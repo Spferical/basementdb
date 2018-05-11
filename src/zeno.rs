@@ -19,7 +19,7 @@ use signed;
 use signed::Signed;
 use tcp::Network;
 
-const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(30);
+const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(1);
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
@@ -163,12 +163,15 @@ fn start_ihatetheprimary_timer(z: &Zeno, zs: &mut ZenoState, net: &Network) {
 
 /// given a client request, does lots of stuff
 fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
+    z_debug!(z, "Got request message");
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
     if already_received_msg(&zs, m) {
+        z_debug!(z, "Already received msg {:?}", m);
         if already_handled_msg(&zs, m) {
             return zs.replies.get(&m.c).unwrap().clone();
         } else {
+            z_debug!(z, "starting IHTP timer");
             start_ihatetheprimary_timer(z, &mut zs, net);
         }
     }
@@ -845,6 +848,20 @@ mod tests {
     #[test]
     fn test_one_client_strong_consistency_replica_fail() {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls,
+            vec![vec![1]; 100],
+            Some((1..101).map(|x| vec![x]).collect()),
+            1,
+            true,
+        );
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+    }
+
+    #[test]
+    fn test_one_client_strong_consistency_primary_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0]);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
