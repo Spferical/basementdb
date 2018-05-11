@@ -1,21 +1,22 @@
 use chrono::Utc;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
-use std::sync::mpsc;
-use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
 
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
-use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
-              ConcreteClientResponseMessage, FillHoleMessage, IHateThePrimaryMessage, Message,
-              NewViewMessage, OrderedRequestMessage, RequestMessage, UnsignedMessage,
-              ViewChangeMessage};
+use message::{
+    ClientResponseMessage, CommitCertificate, CommitMessage, ConcreteClientResponseMessage,
+    FillHoleMessage, IHateThePrimaryMessage, Message, NewViewMessage, OrderedRequestMessage,
+    RequestMessage, UnsignedMessage, ViewChangeMessage,
+};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -597,15 +598,13 @@ fn on_fillhole(z: &Zeno, fhm: FillHoleMessage, net: Network) {
             Some((orm, rm)) => {
                 let net1 = net.clone();
                 let i = fhm.i;
+                let orm1 = orm.clone();
+                let rm1 = rm.clone();
                 thread::spawn(move || {
-                    net1.send(
-                        Message::Unsigned(UnsignedMessage::OrderedRequest(orm.clone())),
-                        i,
-                    ).ok();
-                    net1.send(
-                        Message::Unsigned(UnsignedMessage::Request(rm.clone())),
-                        i,
-                    ).ok();
+                    net1.send(Message::Unsigned(UnsignedMessage::OrderedRequest(orm1)), i)
+                        .ok();
+                    net1.send(Message::Unsigned(UnsignedMessage::Request(rm1)), i)
+                        .ok();
                 });
             }
             None => {}
@@ -739,8 +738,8 @@ pub fn start_zeno(
 
 #[cfg(test)]
 mod tests {
-    use super::ApplyMsg;
     use super::start_zeno;
+    use super::ApplyMsg;
     use signed;
     use std::collections::HashMap;
     use std::net::TcpListener;
