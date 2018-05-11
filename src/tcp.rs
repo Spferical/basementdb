@@ -19,7 +19,7 @@ use str_serialize::StrSerialize;
 use scoped_threadpool::Pool;
 
 const MAX_BUF_SIZE: usize = 1048576;
-const READ_TIMEOUT: u64 = 30;
+const READ_TIMEOUT: u64 = 2;
 const WRITE_TIMEOUT: u64 = 30;
 const CONNECT_TIMEOUT: u64 = 30;
 
