@@ -560,8 +560,10 @@ fn on_newview(z: &Zeno, msg: NewViewMessage, _net: Network) {
         // the sender was not the right primary for this view
         return;
     }
-
-    //TODO: checks
+    if msg.p.len() < z.max_failures as usize * 2 + 1 {
+        // too few viewchange messages collected by primary
+        return;
+    }
     apply_new_view(z, zs, &msg);
     // TODO: to support weak requests, merge all messages in p
     // with the merge protocol
