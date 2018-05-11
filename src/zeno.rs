@@ -166,7 +166,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     if already_received_msg(&zs, &d_req) {
         z_debug!(z, "Already received msg {:?}", m);
         if already_handled_msg(&zs, m) {
-            return zs.replies.get(&m.c).unwrap().clone();
+            return zs.replies.get(&m.c).unwrap_or(&None).clone();
         } else {
             z_debug!(z, "starting IHTP timer");
             start_ihatetheprimary_timer(z, &mut zs, net);
