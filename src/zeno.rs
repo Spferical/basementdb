@@ -782,6 +782,7 @@ mod tests {
     fn start_zenos<T: TestApp>(
         num_servers: usize,
         max_failures: usize,
+        unresponsive_failures: Vec<usize>,
     ) -> (HashMap<signed::Public, String>) {
         let mut urls = Vec::new();
         for _ in 0..num_servers {
@@ -798,6 +799,10 @@ mod tests {
 
         let mut zenos = Vec::new();
         for i in 0..num_servers {
+            if unresponsive_failures.contains(&i) {
+                // just don't start this zeno
+                continue;
+            }
             let (tx, rx) = mpsc::channel();
             zenos.push(start_zeno(
                 urls[i].clone(),
@@ -825,7 +830,21 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls,
+            vec![vec![1]; 100],
+            Some((1..101).map(|x| vec![x]).collect()),
+            1,
+            true,
+        );
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+    }
+
+    #[test]
+    fn test_one_client_strong_consistency_replica_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -872,7 +891,7 @@ mod tests {
 
     #[test]
     fn test_many_clients_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -903,7 +922,7 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures);
+        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures, vec![]);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             client_rxs.push(do_ops_as_new_client(
