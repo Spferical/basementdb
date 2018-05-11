@@ -19,7 +19,7 @@ use signed;
 use signed::Signed;
 use tcp::Network;
 
-const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(30);
+const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(1);
 
 macro_rules! z_debug {
     ($z:expr, $fmt: expr) => {
@@ -66,7 +66,7 @@ struct ZenoState {
     reqs_without_ors: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
     // channels for threads handling requests without COMMITs
     reqs_without_commits: HashMap<HashDigest, Sender<CommitMessage>>,
-    // ORs received for requests we haven't gotten yet
+    // ORs received for requests we haven't gotten yet. sorted
     pending_ors: Vec<OrderedRequestMessage>,
     // COMMITs received for requests we haven't gotten yet
     pending_commits: HashMap<HashDigest, Vec<CommitMessage>>,
@@ -83,8 +83,12 @@ struct ZenoState {
     new_views: HashMap<signed::Public, NewViewMessage>,
 }
 
+fn get_primary_for_view(zs: &ZenoState, v: usize) -> signed::Public {
+    zs.pubkeys[v as usize % zs.pubkeys.len()]
+}
+
 fn get_primary(zs: &ZenoState) -> signed::Public {
-    zs.pubkeys[zs.v as usize % zs.pubkeys.len()]
+    get_primary_for_view(zs, zs.v as usize)
 }
 
 fn is_primary(z: &Zeno, zs: &ZenoState) -> bool {
@@ -159,12 +163,15 @@ fn start_ihatetheprimary_timer(z: &Zeno, zs: &mut ZenoState, net: &Network) {
 
 /// given a client request, does lots of stuff
 fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
+    z_debug!(z, "Got request message");
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
     if already_received_msg(&zs, m) {
+        z_debug!(z, "Already received msg {:?}", m);
         if already_handled_msg(&zs, m) {
             return zs.replies.get(&m.c).unwrap().clone();
         } else {
+            z_debug!(z, "starting IHTP timer");
             start_ihatetheprimary_timer(z, &mut zs, net);
         }
     }
@@ -402,20 +409,34 @@ fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
         z_debug!(z, "Ignoring OR from wrong primary for this view");
         return;
     }
+    process_or(zs, or);
+}
+
+fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
+    match zs.pending_ors.binary_search_by_key(&or.n, |o| o.n) {
+        Ok(_) => {},
+        Err(i) => {
+            zs.pending_ors.insert(i, or);
+        }
+    }
+}
+
+fn process_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
+    if or.n as i64 <= zs.n {
+        return;
+    }
     match zs.reqs_without_ors.remove(&or.d_req) {
         Some(tx) => {
             if or.n == (zs.n + 1) as u64 {
                 tx.send(or).unwrap();
             } else {
                 zs.reqs_without_ors.insert(or.d_req.clone(), tx);
-                zs.pending_ors.push(or);
-                zs.pending_ors.sort_by(|a, b| a.n.cmp(&b.n));
+                queue_or(zs, or);
             }
         }
         None => {
             if !zs.pending_ors.iter().any(|pending_or| *pending_or == or) {
-                zs.pending_ors.push(or);
-                zs.pending_ors.sort_by(|a, b| a.n.cmp(&b.n));
+                queue_or(zs, or);
             }
         }
     }
@@ -482,6 +503,26 @@ fn on_ihatetheprimary(z: &Zeno, msg: IHateThePrimaryMessage, net: Network) {
     }
 }
 
+fn apply_new_view(_z: &Zeno, zs: &mut ZenoState, nvm: &NewViewMessage) {
+    for view_change in nvm.p.iter() {
+        for orm in view_change.o.iter() {
+            process_or(zs, orm.clone());
+        }
+        let new_view_cc_n = match view_change.cc.first() {
+            Some(cm) => cm.or.n as i64,
+            None => -1,
+        };
+        let our_cc_n = match zs.last_cc.first() {
+            Some(cm) => cm.or.n as i64,
+            None => -1,
+        };
+        if new_view_cc_n > our_cc_n {
+            zs.last_cc = view_change.cc.clone();
+        }
+    }
+    zs.v = nvm.v;
+}
+
 fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
     let zs = &mut *z.state.lock().unwrap();
     if msg.v == zs.v {
@@ -490,14 +531,16 @@ fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
             ViewState::ViewActive => {
                 if zs.view_changes.len() >= z.max_failures as usize * 2 + 1 {
                     if is_primary(z, zs) {
+                        let nvm = NewViewMessage {
+                            v: zs.v,
+                            p: zs.view_changes.values().cloned().collect(),
+                            i: z.me,
+                        };
+                        apply_new_view(z, zs, &nvm);
                         let msg = Message::Signed(Signed::new(
-                            UnsignedMessage::NewView(NewViewMessage {
-                                v: zs.v,
-                                p: zs.view_changes.values().cloned().collect(),
-                            }),
+                            UnsignedMessage::NewView(nvm),
                             &z.private_me,
                         ));
-                        //TODO: convert to new view
                         broadcast(net, msg);
                     }
                 }
@@ -505,6 +548,19 @@ fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
             ViewState::ViewChanging => {}
         }
     }
+}
+
+fn on_newview(z: &Zeno, msg: NewViewMessage, _net: Network) {
+    let zs = &mut *z.state.lock().unwrap();
+    if get_primary_for_view(zs, msg.v as usize) != msg.i {
+        // the sender was not the right primary for this view
+        return;
+    }
+
+    //TODO: checks
+    apply_new_view(z, zs, &msg);
+    // TODO: to support weak requests, merge all messages in p
+    // with the merge protocol
 }
 
 impl Zeno {
@@ -516,6 +572,7 @@ impl Zeno {
             UnsignedMessage::Commit(cm) => m.verify(&cm.j),
             UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
             UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
+            UnsignedMessage::NewView(nvm) => m.verify(&nvm.i),
             _ => None,
         }
     }
@@ -553,7 +610,11 @@ impl Zeno {
                 on_viewchange(self, vcm, n);
                 None
             }
-            //TODO: handle new view
+            UnsignedMessage::NewView(nvm) => {
+                z_debug!(self, "GOT NewView");
+                on_newview(self, nvm, n);
+                None
+            }
             _ => None,
         }
     }
@@ -724,6 +785,7 @@ mod tests {
     fn start_zenos<T: TestApp>(
         num_servers: usize,
         max_failures: usize,
+        unresponsive_failures: Vec<usize>,
     ) -> (HashMap<signed::Public, String>) {
         let mut urls = Vec::new();
         for _ in 0..num_servers {
@@ -740,6 +802,10 @@ mod tests {
 
         let mut zenos = Vec::new();
         for i in 0..num_servers {
+            if unresponsive_failures.contains(&i) {
+                // just don't start this zeno
+                continue;
+            }
             let (tx, rx) = mpsc::channel();
             zenos.push(start_zeno(
                 urls[i].clone(),
@@ -767,7 +833,35 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls,
+            vec![vec![1]; 100],
+            Some((1..101).map(|x| vec![x]).collect()),
+            1,
+            true,
+        );
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+    }
+
+    #[test]
+    fn test_one_client_strong_consistency_replica_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls,
+            vec![vec![1]; 100],
+            Some((1..101).map(|x| vec![x]).collect()),
+            1,
+            true,
+        );
+        assert_eq!(rx.recv_timeout(time::Duration::new(30, 0)), Ok(()));
+    }
+
+    #[test]
+    fn test_one_client_strong_consistency_primary_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0]);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -814,7 +908,7 @@ mod tests {
 
     #[test]
     fn test_many_clients_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -845,7 +939,7 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures);
+        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures, vec![]);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             client_rxs.push(do_ops_as_new_client(

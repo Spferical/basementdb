@@ -122,6 +122,8 @@ pub struct ViewChangeMessage {
 pub struct NewViewMessage {
     pub v: u64,
     pub p: Vec<ViewChangeMessage>,
+    // for easy verification. but v must be checked against i later
+    pub i: signed::Public,
 }
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ViewConfirmMessage {}
