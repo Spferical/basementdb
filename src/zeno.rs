@@ -195,9 +195,9 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
                     let mut zs = z.state.lock().unwrap();
                     zs.reqs_without_ors.remove(&d_req);
                     check_and_execute_request(z, zs, &or, m, net)
-                },
+                }
                 // our request may have been clobbered
-                Err(_) => None
+                Err(_) => None,
             }
         }
     }
@@ -418,7 +418,7 @@ fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
 
 fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
     match zs.pending_ors.binary_search_by_key(&or.n, |o| o.n) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(i) => {
             zs.pending_ors.insert(i, or);
         }
