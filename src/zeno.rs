@@ -935,6 +935,82 @@ mod tests {
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
     }
 
+    #[test]
+    fn test_many_clients_strong_consistency_primary_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        wait_on_all(client_rxs, time::Duration::from_secs(30));
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    #[test]
+    fn test_many_clients_strong_consistency_replica_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        wait_on_all(client_rxs, time::Duration::from_secs(30));
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_many_clients_strong_consistency_too_many_fails() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0, 1]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        wait_on_all(client_rxs, time::Duration::from_secs(30));
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(10)).unwrap();
+    }
+
     fn test_input_output(
         input: Vec<Vec<u8>>,
         output: Vec<Vec<u8>>,
