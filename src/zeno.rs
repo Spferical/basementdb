@@ -429,7 +429,7 @@ fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
     }
 }
 
-fn send_fillhole(z: &Zeno, zs: &mut ZenoState, n: u64, net: Network) {
+fn send_fillhole(_z: &Zeno, zs: &mut ZenoState, n: u64, net: Network) {
     let v = zs.v;
     let zs_n = zs.n;
     let i = get_primary(zs);
@@ -600,6 +600,10 @@ fn on_fillhole(z: &Zeno, fhm: FillHoleMessage, net: Network) {
                 thread::spawn(move || {
                     net1.send(
                         Message::Unsigned(UnsignedMessage::OrderedRequest(orm.clone())),
+                        i,
+                    ).ok();
+                    net1.send(
+                        Message::Unsigned(UnsignedMessage::Request(rm.clone())),
                         i,
                     ).ok();
                 });
