@@ -299,14 +299,18 @@ impl Network {
 
     pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        let result = Network::_send(m, client_raw);
-        match result {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                client_raw.stream = None;
-                Err(e)
+        match psc.get_mut(&recipient) {
+            Some(client_raw) => {
+                let result = Network::_send(m, client_raw);
+                match result {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        client_raw.stream = None;
+                        Err(e)
+                    }
+                }
             }
+            _ => Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected")),
         }
     }
 

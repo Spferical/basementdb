@@ -93,7 +93,7 @@ pub struct ReplyMessage {
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct FillHoleMessage {
     pub v: u64,            // Current view number
-    pub n: u64,            // Highest sequence number executed
+    pub n: i64,            // Highest sequence number executed
     pub or_n: u64,         // OrderedRequestMessage.n
     pub i: signed::Public, // Primary public key
 }

@@ -13,8 +13,9 @@ use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{ClientResponseMessage, CommitCertificate, CommitMessage,
-              ConcreteClientResponseMessage, IHateThePrimaryMessage, Message, NewViewMessage,
-              OrderedRequestMessage, RequestMessage, UnsignedMessage, ViewChangeMessage};
+              ConcreteClientResponseMessage, FillHoleMessage, IHateThePrimaryMessage, Message,
+              NewViewMessage, OrderedRequestMessage, RequestMessage, UnsignedMessage,
+              ViewChangeMessage};
 use signed;
 use signed::Signed;
 use tcp::Network;
@@ -403,7 +404,7 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
+fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, net: Network) {
     let zs = &mut *z.state.lock().unwrap();
     if or.v != zs.v {
         z_debug!(z, "Ignoring OR from v:{} because v is {}", or.v, zs.v);
@@ -412,6 +413,9 @@ fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, _net: Network) {
     if or.i != get_primary(zs) {
         z_debug!(z, "Ignoring OR from wrong primary for this view");
         return;
+    }
+    if or.n != (zs.n + 1) as u64 {
+        send_fillhole(z, zs, or.n, net);
     }
     process_or(zs, or);
 }
@@ -423,6 +427,23 @@ fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
             zs.pending_ors.insert(i, or);
         }
     }
+}
+
+fn send_fillhole(z: &Zeno, zs: &mut ZenoState, n: u64, net: Network) {
+    let v = zs.v;
+    let zs_n = zs.n;
+    let i = get_primary(zs);
+    thread::spawn(move || {
+        net.send(
+            Message::Unsigned(UnsignedMessage::FillHole(FillHoleMessage {
+                v: v,
+                n: zs_n,
+                or_n: n,
+                i: i,
+            })),
+            i,
+        ).ok();
+    });
 }
 
 fn process_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
@@ -569,6 +590,25 @@ fn on_newview(z: &Zeno, msg: NewViewMessage, _net: Network) {
     // with the merge protocol
 }
 
+fn on_fillhole(z: &Zeno, fhm: FillHoleMessage, net: Network) {
+    let zs = &mut *z.state.lock().unwrap();
+    for n in ((fhm.n + 1) as u64)..fhm.or_n {
+        match zs.all_executed_reqs.get(n as usize) {
+            Some((orm, rm)) => {
+                let net1 = net.clone();
+                let i = fhm.i;
+                thread::spawn(move || {
+                    net1.send(
+                        Message::Unsigned(UnsignedMessage::OrderedRequest(orm.clone())),
+                        i,
+                    ).ok();
+                });
+            }
+            None => {}
+        }
+    }
+}
+
 impl Zeno {
     pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
         match m.clone().base {
@@ -579,6 +619,7 @@ impl Zeno {
             UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
             UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
             UnsignedMessage::NewView(nvm) => m.verify(&nvm.i),
+            UnsignedMessage::FillHole(fhm) => m.verify(&fhm.i),
             _ => None,
         }
     }
@@ -619,6 +660,11 @@ impl Zeno {
             UnsignedMessage::NewView(nvm) => {
                 z_debug!(self, "GOT NewView");
                 on_newview(self, nvm, n);
+                None
+            }
+            UnsignedMessage::FillHole(fhm) => {
+                z_debug!(self, "GOT FillHole");
+                on_fillhole(self, fhm, n);
                 None
             }
             _ => None,
