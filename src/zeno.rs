@@ -52,7 +52,7 @@ struct ZenoState {
     v: u64,
     h: HashChain,
     // highest timestamp we've received from given client
-    highest_t_received: HashMap<signed::Public, u64>,
+    received: HashSet<HashDigest>,
     // all requests we've executed for each client
     // (index in all_executed_reqs)
     executed_reqs: HashMap<signed::Public, Vec<usize>>,
@@ -105,11 +105,8 @@ pub struct Zeno {
     state: Arc<Mutex<ZenoState>>,
 }
 
-fn already_received_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
-    match zs.highest_t_received.get(&msg.c) {
-        Some(&t) => msg.t <= t,
-        None => false,
-    }
+fn already_received_msg(zs: &ZenoState, d_req: &HashDigest) -> bool {
+    zs.received.contains(d_req)
 }
 
 /// returns whether we've already handled the given client request already
@@ -166,7 +163,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
     z_debug!(z, "Got request message");
     let d_req = digest::d(m);
     let mut zs = z.state.lock().unwrap();
-    if already_received_msg(&zs, m) {
+    if already_received_msg(&zs, &d_req) {
         z_debug!(z, "Already received msg {:?}", m);
         if already_handled_msg(&zs, m) {
             return zs.replies.get(&m.c).unwrap().clone();
@@ -175,6 +172,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
             start_ihatetheprimary_timer(z, &mut zs, net);
         }
     }
+    zs.received.insert(d_req.clone());
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
         && zs.pending_ors[0].n == (zs.n + 1) as u64
     {
@@ -189,12 +187,18 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
             }
         } else {
             let (tx, rx) = mpsc::channel();
+            // note: this may clobber the last client request
             zs.reqs_without_ors.insert(d_req.clone(), tx);
             drop(zs);
-            let or = rx.recv().unwrap();
-            let mut zs = z.state.lock().unwrap();
-            zs.reqs_without_ors.remove(&d_req);
-            check_and_execute_request(z, zs, &or, m, net)
+            match rx.recv() {
+                Ok(or) => {
+                    let mut zs = z.state.lock().unwrap();
+                    zs.reqs_without_ors.remove(&d_req);
+                    check_and_execute_request(z, zs, &or, m, net)
+                },
+                // our request may have been clobbered
+                Err(_) => None
+            }
         }
     }
 }
@@ -656,7 +660,7 @@ pub fn start_zeno(
             n: -1,
             v: 0,
             h: Vec::new(),
-            highest_t_received: HashMap::new(),
+            received: HashSet::new(),
             executed_reqs: HashMap::new(),
             replies: HashMap::new(),
             all_executed_reqs: Vec::new(),
