@@ -1087,4 +1087,99 @@ mod tests {
             assert_eq!(rx.recv_timeout(total_timeout - start.elapsed()), Ok(()));
         }
     }
+
+    fn wait_on_all_benchmark(rxs: Vec<Receiver<()>>, timeout: time::Duration) -> time::Duration {
+        let start = time::Instant::now();
+        let mut average_response_time: time::Duration = time::Duration::new(0, 0);
+        for rx in &rxs {
+            assert_eq!(rx.recv_timeout(timeout - start.elapsed()), Ok(()));
+            let elapsed = start.elapsed();
+            println!("Elapsed: {:?}", elapsed);
+            average_response_time += elapsed;
+        }
+        average_response_time / (rxs.len() as u32)
+    }
+
+    #[test]
+    fn benchmark_strong_consistency() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        let avg = wait_on_all_benchmark(client_rxs, time::Duration::from_secs(30));
+
+        println!("Average latency: {:?}", avg);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    #[test]
+    fn benchmark_many_clients_strong_consistency_primary_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        let avg = wait_on_all_benchmark(client_rxs, time::Duration::from_secs(30));
+
+        println!("Average latency: {:?}", avg);
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    #[test]
+    fn benchmark_many_clients_strong_consistency_replica_fail() {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+        let avg = wait_on_all_benchmark(client_rxs, time::Duration::from_secs(30));
+
+        println!("Average latency: {:?}", avg);
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
 }
