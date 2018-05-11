@@ -277,26 +277,40 @@ impl Network {
     pub fn send_recv(&self, m: Message, recipient: signed::Public) -> Result<Message, io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        Network::_send(m, client_raw)?;
-        Network::_recv(client_raw)
+        let send_result = Network::_send(m, client_raw);
+
+        match send_result {
+            Ok(()) => {}
+            Err(e) => {
+                client_raw.stream = None;
+                return Err(e);
+            }
+        }
+
+        let recv_result = Network::_recv(client_raw);
+        match recv_result {
+            Ok(a) => Ok(a),
+            Err(e) => {
+                client_raw.stream = None;
+                Err(e)
+            }
+        }
     }
 
     pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        Network::_send(m, client_raw)
+        let result = Network::_send(m, client_raw);
+        match result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                client_raw.stream = None;
+                Err(e)
+            }
+        }
     }
 
     pub fn send_to_all(&self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
-        /*let mut psc = self.peer_send_clients.lock().unwrap();
-        return psc.iter()
-            .filter(|(_, v)| self.my_ip_and_port != v.ip_and_port)
-            .map(|(&p, v)| {
-                let m1 = m.clone();
-                (p, thread::spawn(|| Network::_send(m1, &mut v)))
-            })
-            .map(|(p, v)| (p, v.join().unwrap()))
-            .collect();*/
         let mut psc = self.peer_send_clients.lock().unwrap();
         let mut results = HashMap::new();
         let (tx, rx): (
@@ -319,7 +333,17 @@ impl Network {
                     // We can't just mutate results directly because that would mean
                     // multiple mutable borrows.
                     scoped.execute(move || {
-                        tx1.send((pub_key, Network::_send(m1, tcp_client))).unwrap();
+                        let result = Network::_send(m1, tcp_client);
+
+                        let unwrapped = match result {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tcp_client.stream = None;
+                                Err(e)
+                            }
+                        };
+
+                        tx1.send((pub_key, unwrapped)).unwrap();
                     });
                 }
             }
@@ -354,9 +378,17 @@ impl Network {
                     scoped.execute(move || {
                         let send_res = Network::_send(m1, tcp_client);
                         if send_res.is_err() {
+                            tcp_client.stream = None;
+
                             tx1.send((pub_key, Err(send_res.unwrap_err()))).ok();
                         } else {
-                            tx1.send((pub_key, Network::_recv(tcp_client))).ok();
+                            let recv_result = Network::_recv(tcp_client);
+
+                            if recv_result.is_err() {
+                                tcp_client.stream = None;
+                            }
+
+                            tx1.send((pub_key, recv_result)).ok();
                         }
                     });
                 }
