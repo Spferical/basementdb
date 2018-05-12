@@ -982,81 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn test_many_clients_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
-
-        let mut client_rxs = Vec::new();
-        for _ in 0..5 {
-            client_rxs.push(do_ops_as_new_client(
-                pubkeys_to_urls.clone(),
-                vec![vec![1]; 20],
-                None,
-                1,
-                true,
-            ));
-        }
-        wait_on_all(client_rxs, time::Duration::from_secs(30));
-        let rx = do_ops_as_new_client(
-            pubkeys_to_urls.clone(),
-            vec![vec![0]],
-            Some(vec![vec![100]]),
-            1,
-            true,
-        );
-        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
-    }
-
-    #[test]
-    fn test_many_clients_strong_consistency_primary_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
-
-        let mut client_rxs = Vec::new();
-        for _ in 0..5 {
-            client_rxs.push(do_ops_as_new_client(
-                pubkeys_to_urls.clone(),
-                vec![vec![1]; 20],
-                None,
-                1,
-                true,
-            ));
-        }
-        wait_on_all(client_rxs, time::Duration::from_secs(30));
-        let rx = do_ops_as_new_client(
-            pubkeys_to_urls.clone(),
-            vec![vec![0]],
-            Some(vec![vec![100]]),
-            1,
-            true,
-        );
-        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
-    }
-
-    #[test]
-    fn test_many_clients_strong_consistency_replica_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
-
-        let mut client_rxs = Vec::new();
-        for _ in 0..5 {
-            client_rxs.push(do_ops_as_new_client(
-                pubkeys_to_urls.clone(),
-                vec![vec![1]; 20],
-                None,
-                1,
-                true,
-            ));
-        }
-        wait_on_all(client_rxs, time::Duration::from_secs(30));
-        let rx = do_ops_as_new_client(
-            pubkeys_to_urls.clone(),
-            vec![vec![0]],
-            Some(vec![vec![100]]),
-            1,
-            true,
-        );
-        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
-    }
-
-    #[test]
     #[should_panic]
     fn test_many_clients_strong_consistency_too_many_fails() {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0, 1], None);
@@ -1120,9 +1045,7 @@ mod tests {
         average_response_time / (rxs.len() as u32)
     }
 
-    // TODO: Refactor/remove this...
-    #[test]
-    fn benchmark_strong_consistency() {
+    fn many_clients_strong_consistency() -> time::Duration {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let mut client_rxs = Vec::new();
@@ -1148,11 +1071,11 @@ mod tests {
         );
 
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+
+        avg
     }
 
-    // TODO: Refactor/remove this...
-    #[test]
-    fn benchmark_many_clients_strong_consistency_primary_fail() {
+    fn many_clients_strong_consistency_primary_fail() -> time::Duration {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0], None);
 
         let mut client_rxs = Vec::new();
@@ -1176,11 +1099,11 @@ mod tests {
             true,
         );
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+
+        avg
     }
 
-    // TODO: Refactor/remove this...
-    #[test]
-    fn benchmark_many_clients_strong_consistency_replica_fail() {
+    fn many_clients_strong_consistency_replica_fail() -> time::Duration {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let mut client_rxs = Vec::new();
@@ -1204,9 +1127,64 @@ mod tests {
             true,
         );
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+
+        avg
     }
 
-    fn run_byzantine_test(test: fn(Zeno), faulty_servers: Vec<usize>) {
+    fn benchmark(test: fn() -> time::Duration, iters: usize) -> time::Duration {
+        let mut avg = time::Duration::new(0, 0);
+        for i in 0..iters {
+            let curr = test();
+            avg += curr;
+            println!(
+                "Current: {:?}; Average currently is: {:?}",
+                curr,
+                avg / (i as u32 + 1)
+            )
+        }
+        avg / (iters as u32)
+    }
+
+    #[test]
+    fn test_many_clients_strong_consistency_simple() {
+        many_clients_strong_consistency();
+    }
+
+    #[test]
+    fn test_many_clients_strong_consistency_primary_fail() {
+        many_clients_strong_consistency_primary_fail();
+    }
+
+    #[test]
+    fn test_many_clients_strong_consistency_replica_fail() {
+        many_clients_strong_consistency_replica_fail();
+    }
+
+    #[test]
+    fn benchmark_many_clients_strong_consistency_simple() {
+        println!(
+            "Final Latency: {:?}",
+            benchmark(many_clients_strong_consistency, 20)
+        );
+    }
+
+    #[test]
+    fn benchmark_many_clients_strong_consistency_primary_fail() {
+        println!(
+            "Final Latency: {:?}",
+            benchmark(many_clients_strong_consistency_primary_fail, 20)
+        );
+    }
+
+    #[test]
+    fn benchmark_many_clients_strong_consistency_replica_fail() {
+        println!(
+            "Final Latency: {:?}",
+            benchmark(many_clients_strong_consistency_replica_fail, 20)
+        );
+    }
+
+    fn run_byzantine_test(test: fn(Zeno), faulty_servers: Vec<usize>) -> time::Duration {
         let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
 
         let mut client_rxs = Vec::new();
@@ -1233,6 +1211,8 @@ mod tests {
         );
 
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+
+        avg
     }
 
     fn byzantine_hash_digest_mutilation(z: Zeno) {
@@ -1286,9 +1266,18 @@ mod tests {
         }
     }
 
+    fn base_byzantine_hash_digest_mutlation_replica_simple() -> time::Duration {
+        run_byzantine_test(byzantine_hash_digest_mutilation, vec![2])
+    }
+
     #[test]
     fn test_byzantine_hash_digest_mutlation_replica_simple() {
-        run_byzantine_test(byzantine_hash_digest_mutilation, vec![2]);
+        base_byzantine_hash_digest_mutlation_replica_simple();
+    }
+
+    #[test]
+    fn benchmark_byzantine_hash_digest_mutlation_replica_simple() {
+        benchmark(base_byzantine_hash_digest_mutlation_replica_simple, 20);
     }
 
     #[test]
@@ -1297,19 +1286,46 @@ mod tests {
         run_byzantine_test(byzantine_hash_digest_mutilation, vec![1, 2]);
     }
 
+    fn base_byzantine_commit_mutlation_replica_simple() -> time::Duration {
+        run_byzantine_test(byzantine_commit_mutilation, vec![2])
+    }
+
     #[test]
     fn test_byzantine_commit_mutlation_replica_simple() {
-        run_byzantine_test(byzantine_commit_mutilation, vec![2]);
+        base_byzantine_commit_mutlation_replica_simple();
+    }
+
+    #[test]
+    fn benchmark_byzantine_commit_mutlation_replica_simple() {
+        benchmark(base_byzantine_commit_mutlation_replica_simple, 20);
+    }
+
+    fn base_byzantine_n_mutlation_replica_simple() -> time::Duration {
+        run_byzantine_test(byzantine_n_mutilation, vec![2])
     }
 
     #[test]
     fn test_byzantine_n_mutlation_replica_simple() {
-        run_byzantine_test(byzantine_n_mutilation, vec![2]);
+        base_byzantine_n_mutlation_replica_simple();
+    }
+
+    #[test]
+    fn benchmark_byzantine_n_mutlation_replica_simple() {
+        benchmark(base_byzantine_n_mutlation_replica_simple, 20);
+    }
+
+    fn base_byzantine_n_mutlation_replica_primary() -> time::Duration {
+        run_byzantine_test(byzantine_n_mutilation, vec![0])
     }
 
     #[test]
     fn test_byzantine_n_mutlation_replica_primary() {
-        run_byzantine_test(byzantine_n_mutilation, vec![0]);
+        base_byzantine_n_mutlation_replica_primary();
+    }
+
+    #[test]
+    fn benchmark_byzantine_n_mutlation_replica_primary() {
+        benchmark(base_byzantine_n_mutlation_replica_primary, 20);
     }
 
     #[test]
