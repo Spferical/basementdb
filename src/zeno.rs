@@ -747,7 +747,13 @@ mod tests {
     use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
+    use zeno::Zeno;
     use zeno_client;
+
+    use rand::thread_rng;
+    use rand::Rng;
+
+    use digest::HashDigest;
 
     trait TestApp {
         fn new() -> Self;
@@ -841,6 +847,7 @@ mod tests {
         num_servers: usize,
         max_failures: usize,
         unresponsive_failures: Vec<usize>,
+        evil_byzantine_thread: Option<(Vec<usize>, fn(z: Zeno))>,
     ) -> (HashMap<signed::Public, String>) {
         let mut urls = Vec::new();
         for _ in 0..num_servers {
@@ -883,12 +890,25 @@ mod tests {
                 }
             });
         }
+
+        // Simulate faults on one of the nodes
+        match evil_byzantine_thread {
+            Some((faulty_servers, byzantine_function)) => {
+                for faulty_server in faulty_servers {
+                    let faulty_zeno = zenos.get(faulty_server).unwrap().clone();
+                    let byzantine_function_1 = byzantine_function.clone();
+                    thread::spawn(move || byzantine_function_1(faulty_zeno));
+                }
+            }
+            None => {}
+        }
+
         pubkeys_to_urls
     }
 
     #[test]
     fn test_one_client_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -902,7 +922,7 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency_replica_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -916,7 +936,7 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency_primary_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -963,7 +983,7 @@ mod tests {
 
     #[test]
     fn test_many_clients_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -988,7 +1008,7 @@ mod tests {
 
     #[test]
     fn test_many_clients_strong_consistency_primary_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1013,7 +1033,7 @@ mod tests {
 
     #[test]
     fn test_many_clients_strong_consistency_replica_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1039,7 +1059,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_many_clients_strong_consistency_too_many_fails() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0, 1]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0, 1], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1070,7 +1090,7 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures, vec![]);
+        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures, vec![], None);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             client_rxs.push(do_ops_as_new_client(
@@ -1100,9 +1120,10 @@ mod tests {
         average_response_time / (rxs.len() as u32)
     }
 
+    // TODO: Refactor/remove this...
     #[test]
     fn benchmark_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1129,9 +1150,10 @@ mod tests {
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
     }
 
+    // TODO: Refactor/remove this...
     #[test]
     fn benchmark_many_clients_strong_consistency_primary_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1156,9 +1178,10 @@ mod tests {
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
     }
 
+    // TODO: Refactor/remove this...
     #[test]
     fn benchmark_many_clients_strong_consistency_replica_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2]);
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1181,5 +1204,117 @@ mod tests {
             true,
         );
         rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    fn run_byzantine_test(test: fn(Zeno), faulty_servers: Vec<usize>) {
+        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
+
+        let mut client_rxs = Vec::new();
+        for _ in 0..5 {
+            client_rxs.push(do_ops_as_new_client(
+                pubkeys_to_urls.clone(),
+                vec![vec![1]; 20],
+                None,
+                1,
+                true,
+            ));
+        }
+
+        let avg = wait_on_all_benchmark(client_rxs, time::Duration::from_secs(30));
+
+        println!("Average latency: {:?}", avg);
+
+        let rx = do_ops_as_new_client(
+            pubkeys_to_urls.clone(),
+            vec![vec![0]],
+            Some(vec![vec![100]]),
+            1,
+            true,
+        );
+
+        rx.recv_timeout(time::Duration::from_secs(30)).unwrap();
+    }
+
+    fn byzantine_hash_digest_mutilation(z: Zeno) {
+        loop {
+            {
+                let mut zs = z.state.lock().unwrap();
+
+                let kind_of_failure = thread_rng().gen_range(0, 3);
+
+                let h_len = zs.h.len();
+                if kind_of_failure == 0 {
+                    if zs.h.len() > 0 {
+                        zs.h.pop();
+                    }
+                } else if kind_of_failure == 1 {
+                    zs.h.push([1, 2, 3, 4]);
+                } else if kind_of_failure == 2 && h_len > 0 {
+                    zs.h[h_len - 1] = [1, 2, 3, 4];
+                }
+            }
+            thread::sleep(time::Duration::new(0, 100));
+        }
+    }
+
+    fn byzantine_commit_mutilation(z: Zeno) {
+        loop {
+            {
+                let mut zs = z.state.lock().unwrap();
+
+                let pending = &mut zs.pending_commits;
+
+                let random_index = thread_rng().gen_range(0, pending.len());
+                let values: Vec<HashDigest> = pending.keys().map(|k| k.clone()).collect();
+
+                let random_value: &HashDigest = values.get(random_index).unwrap();
+
+                pending.remove(random_value);
+            }
+            thread::sleep(time::Duration::new(0, 100));
+        }
+    }
+
+    fn byzantine_n_mutilation(z: Zeno) {
+        loop {
+            {
+                let mut zs = z.state.lock().unwrap();
+
+                zs.n = 0;
+            }
+            thread::sleep(time::Duration::new(0, 100));
+        }
+    }
+
+    #[test]
+    fn test_byzantine_hash_digest_mutlation_replica_simple() {
+        run_byzantine_test(byzantine_hash_digest_mutilation, vec![2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_byzantine_hash_digest_mutlation_replica_too_many() {
+        run_byzantine_test(byzantine_hash_digest_mutilation, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_byzantine_commit_mutlation_replica_simple() {
+        run_byzantine_test(byzantine_commit_mutilation, vec![2]);
+    }
+
+    #[test]
+    fn test_byzantine_n_mutlation_replica_simple() {
+        run_byzantine_test(byzantine_n_mutilation, vec![2]);
+    }
+
+    #[test]
+    fn test_byzantine_n_mutlation_replica_primary() {
+        run_byzantine_test(byzantine_n_mutilation, vec![0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_byzantine_n_mutlation_replica_too_many() {
+        run_byzantine_test(byzantine_n_mutilation, vec![1, 2]);
     }
 }

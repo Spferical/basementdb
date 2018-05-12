@@ -7,6 +7,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate chrono;
+extern crate rand;
 extern crate scoped_threadpool;
 extern crate sodiumoxide;
 
