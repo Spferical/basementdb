@@ -1241,15 +1241,17 @@ mod tests {
         loop {
             {
                 let mut zs = z.state.lock().unwrap();
-
                 let pending = &mut zs.pending_commits;
+                if !pending.is_empty() {
+                    let random_index = thread_rng().gen_range(0, pending.len());
+                    let values: Vec<HashDigest> = pending.keys().map(|k| k.clone()).collect();
 
-                let random_index = thread_rng().gen_range(0, pending.len());
-                let values: Vec<HashDigest> = pending.keys().map(|k| k.clone()).collect();
+                    let random_value: &HashDigest = values.get(random_index).unwrap();
 
-                let random_value: &HashDigest = values.get(random_index).unwrap();
+                    pending.remove(random_value);
+                }
 
-                pending.remove(random_value);
+
             }
             thread::sleep(time::Duration::new(0, 100));
         }
