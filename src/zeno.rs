@@ -903,6 +903,10 @@ mod tests {
             None => {}
         }
 
+        // give the servers some time to know each other
+        // TODO: detect stabilization rather than sleep
+        thread::sleep(time::Duration::new(2, 0));
+
         pubkeys_to_urls
     }
 
@@ -957,9 +961,6 @@ mod tests {
     ) -> Receiver<()> {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            // give the servers some time to know each other
-            // TODO: detect stabilization rather than sleep
-            thread::sleep(time::Duration::new(2, 0));
             let mut c = zeno_client::Client::new(signed::gen_keys(), pubkeys_to_urls, max_failures);
             for (i, op) in ops.into_iter().enumerate() {
                 let result = c.request(op, strong);
