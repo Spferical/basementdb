@@ -414,7 +414,6 @@ mod tests {
     use signed;
     use std::collections::HashMap;
     use std::net::TcpListener;
-    use std::process::id;
     use std::sync::{Arc, Mutex};
 
     struct TestState {
