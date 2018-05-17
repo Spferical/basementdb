@@ -1132,18 +1132,25 @@ mod tests {
         avg
     }
 
-    fn benchmark(test: fn() -> time::Duration, iters: usize) -> time::Duration {
-        let mut avg = time::Duration::new(0, 0);
-        for i in 0..iters {
+    fn duration_to_fsecs(d: &time::Duration) -> f64 {
+        d.as_secs() as f64 + d.subsec_nanos() as f64 / 1e9
+    }
+
+    fn benchmark(test: fn() -> time::Duration, iters: usize) -> f64 {
+        let mut times = Vec::new();
+        for _ in 0..iters {
             let curr = test();
-            avg += curr;
-            println!(
-                "Current: {:?}; Average currently is: {:?}",
-                curr,
-                avg / (i as u32 + 1)
-            )
+            times.push(curr);
         }
-        avg / (iters as u32)
+        let avg: f64 = times.iter().map(|t| duration_to_fsecs(t)).sum::<f64>() / (iters as f64);
+        let stdev = (times
+            .iter()
+            .map(|t| duration_to_fsecs(t))
+            .map(|secs| (avg - secs).powi(2))
+            .sum::<f64>() / (iters as f64))
+            .sqrt();
+        println!("Avg: {:?}, stdev: {:?}", avg, stdev);
+        avg
     }
 
     #[test]
@@ -1165,7 +1172,7 @@ mod tests {
     fn benchmark_many_clients_strong_consistency_simple() {
         println!(
             "Final Latency: {:?}",
-            benchmark(many_clients_strong_consistency, 20)
+            benchmark(many_clients_strong_consistency, 10)
         );
     }
 
@@ -1173,7 +1180,7 @@ mod tests {
     fn benchmark_many_clients_strong_consistency_primary_fail() {
         println!(
             "Final Latency: {:?}",
-            benchmark(many_clients_strong_consistency_primary_fail, 20)
+            benchmark(many_clients_strong_consistency_primary_fail, 10)
         );
     }
 
@@ -1181,7 +1188,7 @@ mod tests {
     fn benchmark_many_clients_strong_consistency_replica_fail() {
         println!(
             "Final Latency: {:?}",
-            benchmark(many_clients_strong_consistency_replica_fail, 20)
+            benchmark(many_clients_strong_consistency_replica_fail, 10)
         );
     }
 
@@ -1251,8 +1258,6 @@ mod tests {
 
                     pending.remove(random_value);
                 }
-
-
             }
             thread::sleep(time::Duration::new(0, 100));
         }
@@ -1280,7 +1285,7 @@ mod tests {
 
     #[test]
     fn benchmark_byzantine_hash_digest_mutlation_replica_simple() {
-        benchmark(base_byzantine_hash_digest_mutlation_replica_simple, 20);
+        benchmark(base_byzantine_hash_digest_mutlation_replica_simple, 10);
     }
 
     #[test]
@@ -1300,7 +1305,7 @@ mod tests {
 
     #[test]
     fn benchmark_byzantine_commit_mutlation_replica_simple() {
-        benchmark(base_byzantine_commit_mutlation_replica_simple, 20);
+        benchmark(base_byzantine_commit_mutlation_replica_simple, 10);
     }
 
     fn base_byzantine_n_mutlation_replica_simple() -> time::Duration {
@@ -1314,7 +1319,7 @@ mod tests {
 
     #[test]
     fn benchmark_byzantine_n_mutlation_replica_simple() {
-        benchmark(base_byzantine_n_mutlation_replica_simple, 20);
+        benchmark(base_byzantine_n_mutlation_replica_simple, 10);
     }
 
     fn base_byzantine_n_mutlation_replica_primary() -> time::Duration {
@@ -1328,7 +1333,7 @@ mod tests {
 
     #[test]
     fn benchmark_byzantine_n_mutlation_replica_primary() {
-        benchmark(base_byzantine_n_mutlation_replica_primary, 20);
+        benchmark(base_byzantine_n_mutlation_replica_primary, 10);
     }
 
     #[test]

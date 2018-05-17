@@ -1,7 +1,7 @@
 use bincode::serialize;
 use serde::{Deserialize, Serialize};
-use sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
 use sodiumoxide::crypto::sign::{gen_keypair, sign_detached, Signature};
+use sodiumoxide::crypto::sign::{verify_detached, PublicKey, SecretKey};
 
 use str_serialize::StrSerialize;
 

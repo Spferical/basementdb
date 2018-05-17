@@ -1,6 +1,6 @@
 use bincode::serialize;
 use serde::Serialize;
-use sodiumoxide::crypto::hash::{Digest, sha512};
+use sodiumoxide::crypto::hash::{sha512, Digest};
 
 /// A 512-byte SHA-512 hash
 pub type HashDigest = [u64; 4];
