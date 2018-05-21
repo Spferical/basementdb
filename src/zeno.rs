@@ -329,7 +329,7 @@ fn check_and_execute_request(
             history_digest,
             or.h
         );
-        unimplemented!("History digests don't match");
+        return None;
     }
 
     // checks done, let's execute
