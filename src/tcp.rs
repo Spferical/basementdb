@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use message::Message;
+use message::{Message, UnsignedMessage};
 use signed;
 use str_serialize::StrSerialize;
 
@@ -224,6 +224,7 @@ pub struct Network {
     server_channel: Sender<TCPServerCommand>,
     alive_state: Arc<Mutex<bool>>,
     my_ip_and_port: String,
+    server_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>>,
 }
 
 impl Network {
@@ -239,19 +240,25 @@ impl Network {
         let psc1 = psc.clone();
         let alive = Arc::new(Mutex::new(true));
         let alive1 = alive.clone();
+        let threads = Arc::new(Mutex::new(Vec::new()));
         let net = Network {
             peer_send_clients: psc,
             server_channel: tx,
             alive_state: alive,
             my_ip_and_port: my_ip.clone(),
+            server_threads: threads,
         };
         let net1 = net.clone();
 
-        if receive_callback.is_some() {
-            println!("{}: Starting server!", net1.my_ip_and_port.clone());
-            thread::spawn(move || start_server(net1, rx, receive_callback.unwrap()));
+        {
+            let mut threads = net.server_threads.lock().unwrap();
+
+            if receive_callback.is_some() {
+                println!("{}: Starting server!", net1.my_ip_and_port.clone());
+                threads.push(thread::spawn(move || start_server(net1, rx, receive_callback.unwrap())));
+            }
+            threads.push(thread::spawn(move || retry_dead_connections(psc1, alive1)));
         }
-        thread::spawn(move || retry_dead_connections(psc1, alive1));
 
         return net;
     }
@@ -404,6 +411,15 @@ impl Network {
     pub fn halt(&self) {
         *self.alive_state.lock().unwrap() = false;
         self.server_channel.send(TCPServerCommand::Halt).unwrap();
+        let mut threads = self.server_threads.lock().unwrap();
+        // send dummy message to wake server thread up, in case
+        let mut tcpclient = connect_to_server(self.my_ip_and_port.clone());
+        let dummy = Message::Unsigned(UnsignedMessage::Dummy);
+        Network::_send(dummy, &mut tcpclient).ok();
+
+        for thread in threads.drain(..) {
+            thread.join().ok();
+        }
     }
 }
 
@@ -494,5 +510,7 @@ mod tests {
                 break;
             }
         }
+        network1.halt();
+        network2.halt();
     }
 }

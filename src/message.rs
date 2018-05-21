@@ -157,6 +157,7 @@ pub enum UnsignedMessage {
 
     CheckPoint(CheckPointMessage),
 
+    Dummy,
     // For debugging purposes
     Test(TestMessage),
 }
