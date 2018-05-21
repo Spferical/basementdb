@@ -996,7 +996,7 @@ mod tests {
                     assert_eq!(e[i], result);
                 }
             }
-            tx.send(()).unwrap();
+            tx.send(()).ok();
         });
         return rx;
     }
