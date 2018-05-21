@@ -4,7 +4,7 @@ use message;
 use message::UnsignedMessage;
 use signed;
 use tcp::Network;
-use zeno::Zeno;
+use zeno;
 
 #[allow(dead_code)]
 pub struct Client {
@@ -34,7 +34,7 @@ impl Client {
     fn get_data(&self, m: message::Message) -> Option<Vec<u8>> {
         match m {
             message::Message::Signed(sm) => {
-                if let Some(u) = Zeno::verifier(sm) {
+                if let Some(u) = zeno::verifier(sm) {
                     match u {
                         UnsignedMessage::ClientResponse(crm) => Some(crm.r),
                         _ => None,

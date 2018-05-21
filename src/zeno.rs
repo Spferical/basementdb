@@ -46,7 +46,8 @@ enum ViewState {
 
 /// stores the mutable state of our zeno server
 #[allow(dead_code)]
-struct ZenoState {
+struct ZenoMutState {
+    alive: bool,
     pubkeys: Vec<signed::Public>,
 
     // See 4.3
@@ -85,36 +86,48 @@ struct ZenoState {
     new_views: HashMap<signed::Public, NewViewMessage>,
 }
 
-fn get_primary_for_view(zs: &ZenoState, v: usize) -> signed::Public {
+fn get_primary_for_view(zs: &ZenoMutState, v: usize) -> signed::Public {
     zs.pubkeys[v as usize % zs.pubkeys.len()]
 }
 
-fn get_primary(zs: &ZenoState) -> signed::Public {
+fn get_primary(zs: &ZenoMutState) -> signed::Public {
     get_primary_for_view(zs, zs.v as usize)
 }
 
-fn is_primary(z: &Zeno, zs: &ZenoState) -> bool {
+fn is_primary(z: &ZenoState, zs: &ZenoMutState) -> bool {
     get_primary(zs) == z.me
 }
 
 /// represents the entire state of our zeno server
 #[derive(Clone)]
-pub struct Zeno {
+pub struct ZenoState {
     url: String,
     me: signed::Public,
     private_me: signed::Private,
     max_failures: u64,
-    state: Arc<Mutex<ZenoState>>,
+    mut_state: Arc<Mutex<ZenoMutState>>,
 }
 
-fn already_received_msg(zs: &ZenoState, d_req: &HashDigest) -> bool {
+pub struct Zeno {
+    state: ZenoState,
+    network: Network,
+}
+
+impl Drop for Zeno {
+    fn drop(&mut self) {
+        self.network.halt();
+        self.state.halt();
+    }
+}
+
+fn already_received_msg(zs: &ZenoMutState, d_req: &HashDigest) -> bool {
     zs.received.contains(d_req)
 }
 
 /// returns whether we've already handled the given client request already
 /// (specifically, whether the last request in zs.all_executed_reqs is newer than
 /// msg)
-fn already_handled_msg(zs: &ZenoState, msg: &RequestMessage) -> bool {
+fn already_handled_msg(zs: &ZenoMutState, msg: &RequestMessage) -> bool {
     match zs.executed_reqs.get(&msg.c) {
         Some(reqs) => match reqs.last() {
             Some(&last_req_n) => zs.all_executed_reqs[last_req_n].1.t >= msg.t,
@@ -136,14 +149,14 @@ fn broadcast(net: Network, msg: Message) {
     }
 }
 
-fn start_ihatetheprimary_timer(z: &Zeno, zs: &mut ZenoState, net: &Network) {
+fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Network) {
     let (tx, rx) = mpsc::channel();
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
     let net1 = net.clone();
     thread::spawn(move || match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
         Err(_) => {
-            let mut zs1 = z1.state.lock().unwrap();
+            let mut zs1 = z1.mut_state.lock().unwrap();
             zs1.ihatetheprimary_accusations.insert(z1.me);
 
             let msg = get_signed_message(
@@ -161,10 +174,10 @@ fn start_ihatetheprimary_timer(z: &Zeno, zs: &mut ZenoState, net: &Network) {
 }
 
 /// given a client request, does lots of stuff
-fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Message> {
+fn on_request_message(z: &ZenoState, m: &RequestMessage, net: &Network) -> Option<Message> {
     z_debug!(z, "Got request message");
     let d_req = digest::d(m);
-    let mut zs = z.state.lock().unwrap();
+    let mut zs = z.mut_state.lock().unwrap();
     if already_received_msg(&zs, &d_req) {
         z_debug!(z, "Already received msg {:?}", m);
         if already_handled_msg(&zs, m) {
@@ -194,7 +207,7 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
             drop(zs);
             match rx.recv() {
                 Ok(or) => {
-                    let mut zs = z.state.lock().unwrap();
+                    let mut zs = z.mut_state.lock().unwrap();
                     zs.reqs_without_ors.remove(&d_req);
                     check_and_execute_request(z, zs, &or, m, net)
                 }
@@ -209,8 +222,8 @@ fn on_request_message(z: &Zeno, m: &RequestMessage, net: &Network) -> Option<Mes
 /// Also starts a thread to send the OrderedRequestMessage to all servers.
 /// Does not apply the message.
 fn order_message(
-    z: &Zeno,
-    zs: &mut ZenoState,
+    z: &ZenoState,
+    zs: &mut ZenoMutState,
     m: &RequestMessage,
     n: &Network,
 ) -> Option<OrderedRequestMessage> {
@@ -267,7 +280,7 @@ fn order_message(
 ///
 /// Assumes that we've already verified om and msg and they are correct.
 fn generate_client_response(
-    z: &Zeno,
+    z: &ZenoState,
     app_response: Vec<u8>,
     om: &OrderedRequestMessage,
     msg: &RequestMessage,
@@ -300,8 +313,8 @@ fn generate_client_response(
 /// application and returns a channel receiver on which the application
 /// will send its response.
 fn check_and_execute_request(
-    z: &Zeno,
-    mut zs: MutexGuard<ZenoState>,
+    z: &ZenoState,
+    mut zs: MutexGuard<ZenoMutState>,
     or: &OrderedRequestMessage,
     msg: &RequestMessage,
     net: &Network,
@@ -387,13 +400,17 @@ fn check_and_execute_request(
         });
 
         while commit_cert.len() < 2 * z.max_failures as usize {
-            let commit = rx_commit.recv().unwrap();
-            if commit.or == *or {
-                commit_cert.insert(commit);
+            if let Ok(commit) = rx_commit.recv() {
+                if commit.or == *or {
+                    commit_cert.insert(commit);
+                }
+            } else {
+                // this should only happen if the server's stopping
+                return None;
             }
         }
 
-        let mut zs1 = z.state.lock().unwrap();
+        let mut zs1 = z.mut_state.lock().unwrap();
         zs1.reqs_without_commits.remove(&or.d_req);
         zs1.last_cc = commit_cert.into_iter().collect();
         zs1.last_cc.sort_by(|ref a, ref b| a.j.cmp(&(b.j)));
@@ -405,8 +422,8 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, net: Network) {
-    let zs = &mut *z.state.lock().unwrap();
+fn on_ordered_request(z: &ZenoState, or: OrderedRequestMessage, net: Network) {
+    let zs = &mut *z.mut_state.lock().unwrap();
     if or.v != zs.v {
         z_debug!(z, "Ignoring OR from v:{} because v is {}", or.v, zs.v);
         return;
@@ -421,7 +438,7 @@ fn on_ordered_request(z: &Zeno, or: OrderedRequestMessage, net: Network) {
     process_or(zs, or);
 }
 
-fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
+fn queue_or(zs: &mut ZenoMutState, or: OrderedRequestMessage) {
     match zs.pending_ors.binary_search_by_key(&or.n, |o| o.n) {
         Ok(_) => {}
         Err(i) => {
@@ -430,7 +447,7 @@ fn queue_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
     }
 }
 
-fn send_fillhole(_z: &Zeno, zs: &mut ZenoState, n: u64, net: Network) {
+fn send_fillhole(_z: &ZenoState, zs: &mut ZenoMutState, n: u64, net: Network) {
     let v = zs.v;
     let zs_n = zs.n;
     let i = get_primary(zs);
@@ -447,7 +464,7 @@ fn send_fillhole(_z: &Zeno, zs: &mut ZenoState, n: u64, net: Network) {
     });
 }
 
-fn process_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
+fn process_or(zs: &mut ZenoMutState, or: OrderedRequestMessage) {
     if or.n as i64 <= zs.n {
         return;
     }
@@ -468,8 +485,8 @@ fn process_or(zs: &mut ZenoState, or: OrderedRequestMessage) {
     }
 }
 
-fn on_commit(z: &Zeno, cm: CommitMessage) {
-    let zs = &mut *z.state.lock().unwrap();
+fn on_commit(z: &ZenoState, cm: CommitMessage) {
+    let zs = &mut *z.mut_state.lock().unwrap();
     match zs.reqs_without_commits.get(&cm.or.d_req) {
         Some(tx) => {
             z_debug!(z, "Sending commit to existing thread");
@@ -485,15 +502,15 @@ fn on_commit(z: &Zeno, cm: CommitMessage) {
     }
 }
 
-fn is_view_active(zs: &ZenoState) -> bool {
+fn is_view_active(zs: &ZenoMutState) -> bool {
     match zs.view_state {
         ViewState::ViewActive => true,
         ViewState::ViewChanging => false,
     }
 }
 
-fn on_ihatetheprimary(z: &Zeno, msg: IHateThePrimaryMessage, net: Network) {
-    let mut zs = z.state.lock().unwrap();
+fn on_ihatetheprimary(z: &ZenoState, msg: IHateThePrimaryMessage, net: Network) {
+    let mut zs = z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.ihatetheprimary_accusations.insert(msg.i);
         // switch the view from active to inactive if we've gotten enough
@@ -529,7 +546,7 @@ fn on_ihatetheprimary(z: &Zeno, msg: IHateThePrimaryMessage, net: Network) {
     }
 }
 
-fn apply_new_view(_z: &Zeno, zs: &mut ZenoState, nvm: &NewViewMessage) {
+fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
     for view_change in nvm.p.iter() {
         for orm in view_change.o.iter() {
             process_or(zs, orm.clone());
@@ -549,8 +566,8 @@ fn apply_new_view(_z: &Zeno, zs: &mut ZenoState, nvm: &NewViewMessage) {
     zs.v = nvm.v;
 }
 
-fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
-    let zs = &mut *z.state.lock().unwrap();
+fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: Network) {
+    let zs = &mut *z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.view_changes.insert(msg.i, msg);
         match zs.view_state {
@@ -576,8 +593,8 @@ fn on_viewchange(z: &Zeno, msg: ViewChangeMessage, net: Network) {
     }
 }
 
-fn on_newview(z: &Zeno, msg: NewViewMessage, _net: Network) {
-    let zs = &mut *z.state.lock().unwrap();
+fn on_newview(z: &ZenoState, msg: NewViewMessage, _net: Network) {
+    let zs = &mut *z.mut_state.lock().unwrap();
     if get_primary_for_view(zs, msg.v as usize) != msg.i {
         // the sender was not the right primary for this view
         return;
@@ -591,8 +608,8 @@ fn on_newview(z: &Zeno, msg: NewViewMessage, _net: Network) {
     // with the merge protocol
 }
 
-fn on_fillhole(z: &Zeno, fhm: FillHoleMessage, net: Network) {
-    let zs = &mut *z.state.lock().unwrap();
+fn on_fillhole(z: &ZenoState, fhm: FillHoleMessage, net: Network) {
+    let zs = &mut *z.mut_state.lock().unwrap();
     for n in ((fhm.n + 1) as u64)..fhm.or_n {
         match zs.all_executed_reqs.get(n as usize) {
             Some((orm, rm)) => {
@@ -612,18 +629,27 @@ fn on_fillhole(z: &Zeno, fhm: FillHoleMessage, net: Network) {
     }
 }
 
-impl Zeno {
-    pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
-        match m.clone().base {
-            UnsignedMessage::Request(rm) => m.verify(&rm.c),
-            UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
-            UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
-            UnsignedMessage::Commit(cm) => m.verify(&cm.j),
-            UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
-            UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
-            UnsignedMessage::NewView(nvm) => m.verify(&nvm.i),
-            UnsignedMessage::FillHole(fhm) => m.verify(&fhm.i),
-            _ => None,
+pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
+    match m.clone().base {
+        UnsignedMessage::Request(rm) => m.verify(&rm.c),
+        UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
+        UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
+        UnsignedMessage::Commit(cm) => m.verify(&cm.j),
+        UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
+        UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
+        UnsignedMessage::NewView(nvm) => m.verify(&nvm.i),
+        UnsignedMessage::FillHole(fhm) => m.verify(&fhm.i),
+        _ => None,
+    }
+}
+
+impl ZenoState {
+    fn halt(&mut self) {
+        // cleanup all active threads/etc, if we can
+        if let Ok(mut zs) = self.mut_state.lock() {
+            zs.alive = false;
+            zs.reqs_without_ors.clear();
+            zs.reqs_without_commits.clear();
         }
     }
 
@@ -633,7 +659,7 @@ impl Zeno {
                 let reply_opt = on_request_message(self, &rm, &n);
                 match reply_opt.clone() {
                     Some(reply) => {
-                        let mut zs = self.state.lock().unwrap();
+                        let mut zs = self.mut_state.lock().unwrap();
                         zs.replies.insert(rm.c, Some(reply));
                     }
                     None => {}
@@ -677,7 +703,7 @@ impl Zeno {
     fn handle_message(self, m: Message, n: Network) -> Option<Message> {
         match m {
             Message::Unsigned(um) => self.match_unsigned_message(um, n),
-            Message::Signed(sm) => match Zeno::verifier(sm) {
+            Message::Signed(sm) => match verifier(sm) {
                 None => {
                     z_debug!(self, "Unable to verify message!");
                     None
@@ -701,12 +727,13 @@ pub fn start_zeno(
 ) -> Zeno {
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
-    let zeno = Zeno {
+    let state = ZenoState {
         url: url.clone(),
         me: kp.clone().0,
         private_me: kp.clone().1,
         max_failures: max_failures,
-        state: Arc::new(Mutex::new(ZenoState {
+        mut_state: Arc::new(Mutex::new(ZenoMutState {
+            alive: true,
             pubkeys: pubkeys,
             n: -1,
             v: 0,
@@ -728,12 +755,12 @@ pub fn start_zeno(
             new_views: HashMap::new(),
         })),
     };
-    Network::new(
+    let net = Network::new(
         url,
         pubkeys_to_url_without_me,
-        Some((Zeno::handle_message, zeno.clone())),
+        Some((ZenoState::handle_message, state.clone())),
     );
-    zeno
+    Zeno{state: state, network: net}
 }
 
 #[cfg(test)]
@@ -747,6 +774,7 @@ mod tests {
     use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
+    use zeno::ZenoState;
     use zeno::Zeno;
     use zeno_client;
 
@@ -847,8 +875,8 @@ mod tests {
         num_servers: usize,
         max_failures: usize,
         unresponsive_failures: Vec<usize>,
-        evil_byzantine_thread: Option<(Vec<usize>, fn(z: Zeno))>,
-    ) -> (HashMap<signed::Public, String>) {
+        evil_byzantine_thread: Option<(Vec<usize>, fn(z: ZenoState))>,
+    ) -> (Vec<Zeno>, HashMap<signed::Public, String>) {
         let mut urls = Vec::new();
         for _ in 0..num_servers {
             urls.push(format!("127.0.0.1:{}", port_adj()));
@@ -895,7 +923,7 @@ mod tests {
         match evil_byzantine_thread {
             Some((faulty_servers, byzantine_function)) => {
                 for faulty_server in faulty_servers {
-                    let faulty_zeno = zenos.get(faulty_server).unwrap().clone();
+                    let faulty_zeno = zenos.get(faulty_server).unwrap().state.clone();
                     let byzantine_function_1 = byzantine_function.clone();
                     thread::spawn(move || byzantine_function_1(faulty_zeno));
                 }
@@ -907,12 +935,12 @@ mod tests {
         // TODO: detect stabilization rather than sleep
         thread::sleep(time::Duration::new(2, 0));
 
-        pubkeys_to_urls
+        (zenos, pubkeys_to_urls)
     }
 
     #[test]
     fn test_one_client_strong_consistency() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -926,7 +954,7 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency_replica_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -940,7 +968,7 @@ mod tests {
 
     #[test]
     fn test_one_client_strong_consistency_primary_fail() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![0], None);
 
         let rx = do_ops_as_new_client(
             pubkeys_to_urls,
@@ -985,7 +1013,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_many_clients_strong_consistency_too_many_fails() {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0, 1], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![0, 1], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1016,7 +1044,7 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let pubkeys_to_urls = start_zenos::<EchoApp>(num_servers, max_failures, vec![], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<EchoApp>(num_servers, max_failures, vec![], None);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             client_rxs.push(do_ops_as_new_client(
@@ -1047,7 +1075,7 @@ mod tests {
     }
 
     fn many_clients_strong_consistency() -> time::Duration {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1077,7 +1105,7 @@ mod tests {
     }
 
     fn many_clients_strong_consistency_primary_fail() -> time::Duration {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![0], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![0], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1105,7 +1133,7 @@ mod tests {
     }
 
     fn many_clients_strong_consistency_replica_fail() -> time::Duration {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![2], None);
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![2], None);
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1195,8 +1223,8 @@ mod tests {
         );
     }
 
-    fn run_byzantine_test(test: fn(Zeno), faulty_servers: Vec<usize>) -> time::Duration {
-        let pubkeys_to_urls = start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
+    fn run_byzantine_test(test: fn(ZenoState), faulty_servers: Vec<usize>) -> time::Duration {
+        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {
@@ -1226,10 +1254,10 @@ mod tests {
         avg
     }
 
-    fn byzantine_hash_digest_mutilation(z: Zeno) {
+    fn byzantine_hash_digest_mutilation(z: ZenoState) {
         loop {
             {
-                let mut zs = z.state.lock().unwrap();
+                let mut zs = z.mut_state.lock().unwrap();
 
                 let kind_of_failure = thread_rng().gen_range(0, 3);
 
@@ -1248,10 +1276,10 @@ mod tests {
         }
     }
 
-    fn byzantine_commit_mutilation(z: Zeno) {
+    fn byzantine_commit_mutilation(z: ZenoState) {
         loop {
             {
-                let mut zs = z.state.lock().unwrap();
+                let mut zs = z.mut_state.lock().unwrap();
                 let pending = &mut zs.pending_commits;
                 if !pending.is_empty() {
                     let random_index = thread_rng().gen_range(0, pending.len());
@@ -1266,10 +1294,10 @@ mod tests {
         }
     }
 
-    fn byzantine_n_mutilation(z: Zeno) {
+    fn byzantine_n_mutilation(z: ZenoState) {
         loop {
             {
-                let mut zs = z.state.lock().unwrap();
+                let mut zs = z.mut_state.lock().unwrap();
 
                 zs.n = 0;
             }
