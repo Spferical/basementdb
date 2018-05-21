@@ -1169,6 +1169,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_many_clients_strong_consistency_simple() {
         println!(
             "Final Latency: {:?}",
@@ -1177,6 +1178,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_many_clients_strong_consistency_primary_fail() {
         println!(
             "Final Latency: {:?}",
@@ -1185,6 +1187,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_many_clients_strong_consistency_replica_fail() {
         println!(
             "Final Latency: {:?}",
@@ -1284,6 +1287,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_byzantine_hash_digest_mutlation_replica_simple() {
         benchmark(base_byzantine_hash_digest_mutlation_replica_simple, 10);
     }
@@ -1304,6 +1308,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_byzantine_commit_mutlation_replica_simple() {
         benchmark(base_byzantine_commit_mutlation_replica_simple, 10);
     }
@@ -1318,6 +1323,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_byzantine_n_mutlation_replica_simple() {
         benchmark(base_byzantine_n_mutlation_replica_simple, 10);
     }
@@ -1332,6 +1338,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn benchmark_byzantine_n_mutlation_replica_primary() {
         benchmark(base_byzantine_n_mutlation_replica_primary, 10);
     }
