@@ -16,7 +16,6 @@ use message::{Message, UnsignedMessage};
 use signed;
 use str_serialize::StrSerialize;
 
-use scoped_threadpool::Pool;
 
 const MAX_BUF_SIZE: usize = 1048576;
 const READ_TIMEOUT: u64 = 2;
@@ -179,14 +178,15 @@ pub fn connect_to_server(ip_and_port: String) -> TCPClient {
 
 fn try_connecting_to_everyone(
     h: HashMap<signed::Public, String>,
-) -> HashMap<signed::Public, TCPClient> {
+) -> HashMap<signed::Public, Arc<Mutex<TCPClient>>> {
     h.into_iter()
         .map(|(p, o)| (p, connect_to_server(o.to_string())))
+        .map(|(p, o)| (p, Arc::new(Mutex::new(o))))
         .collect()
 }
 
 fn retry_dead_connections(
-    p: Arc<Mutex<HashMap<signed::Public, TCPClient>>>,
+    p: Arc<Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>>,
     alive: Arc<Mutex<bool>>,
 ) {
     loop {
@@ -204,8 +204,8 @@ fn retry_dead_connections(
             let conns = &*p.lock().unwrap();
             retries = conns
                 .into_iter()
-                .filter(|(_, v)| v.stream.is_none())
-                .map(|(p, v)| (p.clone(), v.ip_and_port.clone()))
+                .filter(|(_, v)| v.lock().unwrap().stream.is_none())
+                .map(|(p, v)| (p.clone(), v.lock().unwrap().ip_and_port.clone()))
                 .collect();
         }
 
@@ -220,7 +220,7 @@ fn retry_dead_connections(
 
 #[derive(Clone)]
 pub struct Network {
-    peer_send_clients: Arc<Mutex<HashMap<signed::Public, TCPClient>>>,
+    peer_send_clients: Arc<Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>>,
     server_channel: Sender<TCPServerCommand>,
     alive_state: Arc<Mutex<bool>>,
     my_ip_and_port: String,
@@ -233,8 +233,7 @@ impl Network {
         public_key_to_ip_map: HashMap<signed::Public, String>,
         receive_callback: Option<ServerCallback<T>>,
     ) -> Network {
-        let peer_send_clients: HashMap<signed::Public, TCPClient> =
-            try_connecting_to_everyone(public_key_to_ip_map);
+        let peer_send_clients = try_connecting_to_everyone(public_key_to_ip_map);
         let (tx, rx): (Sender<TCPServerCommand>, Receiver<TCPServerCommand>) = mpsc::channel();
         let psc = Arc::new(Mutex::new(peer_send_clients));
         let psc1 = psc.clone();
@@ -283,46 +282,52 @@ impl Network {
 
     pub fn send_recv(&self, m: Message, recipient: signed::Public) -> Result<Message, io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        let client_raw: &mut TCPClient = psc.get_mut(&recipient).unwrap();
-        let send_result = Network::_send(m, client_raw);
+        if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
+            drop(psc);
+            let mut client_raw = &mut client_raw_lock.lock().unwrap();
+            let send_result = Network::_send(m, client_raw);
 
-        match send_result {
-            Ok(()) => {}
-            Err(e) => {
-                client_raw.stream = None;
-                return Err(e);
+            match send_result {
+                Ok(()) => {}
+                Err(e) => {
+                    client_raw.stream = None;
+                    return Err(e);
+                }
             }
-        }
 
-        let recv_result = Network::_recv(client_raw);
-        match recv_result {
-            Ok(a) => Ok(a),
-            Err(e) => {
-                client_raw.stream = None;
-                Err(e)
+            let recv_result = Network::_recv(client_raw);
+            match recv_result {
+                Ok(a) => Ok(a),
+                Err(e) => {
+                    client_raw.stream = None;
+                    Err(e)
+                }
             }
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected"))
         }
     }
 
     pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        match psc.get_mut(&recipient) {
-            Some(client_raw) => {
-                let result = Network::_send(m, client_raw);
-                match result {
-                    Ok(()) => Ok(()),
-                    Err(e) => {
-                        client_raw.stream = None;
-                        Err(e)
-                    }
+        if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
+            drop(psc);
+            let mut client_raw = &mut client_raw_lock.lock().unwrap();
+            let result = Network::_send(m, client_raw);
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    client_raw.stream = None;
+                    Err(e)
                 }
             }
-            _ => Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected")),
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected"))
         }
     }
 
     pub fn send_to_all(&self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
-        let mut psc = self.peer_send_clients.lock().unwrap();
+        let psc = self.peer_send_clients.lock().unwrap();
         let mut results = HashMap::new();
         let (tx, rx): (
             Sender<(signed::Public, Result<(), io::Error>)>,
@@ -332,39 +337,39 @@ impl Network {
         // We need to be convinced that our operations on psc's TCPClients
         // will not outlive psc's current binding. scoped_threadpool helps
         // with that.
-        let mut pool = Pool::new(psc.len() as u32);
-        pool.scoped(|scoped| {
-            for kv in &mut *psc {
-                let (&pub_key, tcp_client) = kv;
-                if self.my_ip_and_port != tcp_client.ip_and_port {
-                    let m1 = m.clone();
-                    let tx1 = tx.clone();
+        for kv in psc.iter() {
+            let (pub_key, tcp_client_lock) = (kv.0.clone(), kv.1.clone());
+            let m1 = m.clone();
+            let tx1 = tx.clone();
+            let my_ip_and_port = self.my_ip_and_port.clone();
 
-                    // Send on this channel to signify that the operation is over.
-                    // We can't just mutate results directly because that would mean
-                    // multiple mutable borrows.
-                    scoped.execute(move || {
-                        let result = Network::_send(m1, tcp_client);
+            // Send on this channel to signify that the operation is over.
+            // We can't just mutate results directly because that would mean
+            // multiple mutable borrows.
+            thread::spawn(move || {
+                let tcp_client = &mut tcp_client_lock.lock().unwrap();
+                if my_ip_and_port != tcp_client.ip_and_port {
+                    let result = Network::_send(m1, tcp_client);
+                    let unwrapped = match result {
+                        Ok(()) => Ok(()),
+                        Err(e) => {
+                            tcp_client.stream = None;
+                            Err(e)
+                        }
+                    };
 
-                        let unwrapped = match result {
-                            Ok(()) => Ok(()),
-                            Err(e) => {
-                                tcp_client.stream = None;
-                                Err(e)
-                            }
-                        };
-
-                        tx1.send((pub_key, unwrapped)).unwrap();
-                    });
+                    tx1.send((pub_key, unwrapped)).unwrap();
                 }
-            }
-        });
-
-        // Wait for every TCPClient to send a message to everyone
-        for msg in rx.recv() {
-            results.insert(msg.0, msg.1);
+            });
         }
 
+        drop(psc);
+        drop(tx);
+
+        // Wait for every TCPClient to send a message to everyone
+        for msg in rx.iter() {
+            results.insert(msg.0, msg.1);
+        }
         return results;
     }
 
@@ -372,39 +377,38 @@ impl Network {
         &self,
         m: Message,
     ) -> Receiver<(signed::Public, Result<Message, io::Error>)> {
-        let mut psc = self.peer_send_clients.lock().unwrap();
+        let psc = self.peer_send_clients.lock().unwrap();
         let (tx, rx): (
             Sender<(signed::Public, Result<Message, io::Error>)>,
             Receiver<(signed::Public, Result<Message, io::Error>)>,
         ) = mpsc::channel();
 
-        let mut pool = Pool::new(psc.len() as u32);
-        pool.scoped(|scoped| {
-            for kv in &mut *psc {
-                let (&pub_key, tcp_client) = kv;
-                if self.my_ip_and_port != tcp_client.ip_and_port {
-                    let m1 = m.clone();
-                    let tx1 = tx.clone();
+        for kv in psc.iter() {
+            let (pub_key, tcp_client_lock) = (kv.0.clone(), kv.1.clone());
+            let m1 = m.clone();
+            let tx1 = tx.clone();
+            let my_ip_and_port = self.my_ip_and_port.clone();
 
-                    scoped.execute(move || {
-                        let send_res = Network::_send(m1, tcp_client);
-                        if send_res.is_err() {
+            thread::spawn(move || {
+                let mut tcp_client = &mut tcp_client_lock.lock().unwrap();
+                if my_ip_and_port != tcp_client.ip_and_port {
+                    let send_res = Network::_send(m1, &mut tcp_client);
+                    if send_res.is_err() {
+                        tcp_client.stream = None;
+
+                        tx1.send((pub_key, Err(send_res.unwrap_err()))).ok();
+                    } else {
+                        let recv_result = Network::_recv(&mut tcp_client);
+
+                        if recv_result.is_err() {
                             tcp_client.stream = None;
-
-                            tx1.send((pub_key, Err(send_res.unwrap_err()))).ok();
-                        } else {
-                            let recv_result = Network::_recv(tcp_client);
-
-                            if recv_result.is_err() {
-                                tcp_client.stream = None;
-                            }
-
-                            tx1.send((pub_key, recv_result)).ok();
                         }
-                    });
+
+                        tx1.send((pub_key, recv_result)).ok();
+                    }
                 }
-            }
-        });
+            });
+        }
         return rx;
     }
 
