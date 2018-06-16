@@ -760,7 +760,10 @@ pub fn start_zeno(
         pubkeys_to_url_without_me,
         Some((ZenoState::handle_message, state.clone())),
     );
-    Zeno{state: state, network: net}
+    Zeno {
+        state: state,
+        network: net,
+    }
 }
 
 #[cfg(test)]
@@ -774,8 +777,8 @@ mod tests {
     use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
-    use zeno::ZenoState;
     use zeno::Zeno;
+    use zeno::ZenoState;
     use zeno_client;
 
     use rand::thread_rng;
@@ -1044,7 +1047,8 @@ mod tests {
         strong: bool,
         num_clients: usize,
     ) {
-        let (_zenos, pubkeys_to_urls) = start_zenos::<EchoApp>(num_servers, max_failures, vec![], None);
+        let (_zenos, pubkeys_to_urls) =
+            start_zenos::<EchoApp>(num_servers, max_failures, vec![], None);
         let mut client_rxs = Vec::new();
         for _ in 0..num_clients {
             client_rxs.push(do_ops_as_new_client(
@@ -1224,7 +1228,8 @@ mod tests {
     }
 
     fn run_byzantine_test(test: fn(ZenoState), faulty_servers: Vec<usize>) -> time::Duration {
-        let (_zenos, pubkeys_to_urls) = start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
+        let (_zenos, pubkeys_to_urls) =
+            start_zenos::<CountApp>(4, 1, vec![], Some((faulty_servers, test)));
 
         let mut client_rxs = Vec::new();
         for _ in 0..5 {

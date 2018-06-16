@@ -16,7 +16,6 @@ use message::{Message, UnsignedMessage};
 use signed;
 use str_serialize::StrSerialize;
 
-
 const MAX_BUF_SIZE: usize = 1048576;
 const READ_TIMEOUT: u64 = 2;
 const WRITE_TIMEOUT: u64 = 30;
@@ -254,7 +253,9 @@ impl Network {
 
             if receive_callback.is_some() {
                 println!("{}: Starting server!", net1.my_ip_and_port.clone());
-                threads.push(thread::spawn(move || start_server(net1, rx, receive_callback.unwrap())));
+                threads.push(thread::spawn(move || {
+                    start_server(net1, rx, receive_callback.unwrap())
+                }));
             }
             threads.push(thread::spawn(move || retry_dead_connections(psc1, alive1)));
         }
