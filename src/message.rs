@@ -142,7 +142,7 @@ pub struct CheckPointMessage {}
 pub enum UnsignedMessage {
     Request(RequestMessage),
     OrderedRequest(OrderedRequestMessage),
-    ClientResponse(ClientResponseMessage),
+    ClientResponse(Box<ClientResponseMessage>),
     Commit(CommitMessage),
     FillHole(FillHoleMessage),
 

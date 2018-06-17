@@ -302,7 +302,7 @@ fn generate_client_response(
         or: om.clone(),
     };
     Message::Signed(Signed::new(
-        UnsignedMessage::ClientResponse(crm),
+        UnsignedMessage::ClientResponse(Box::new(crm)),
         &z.private_me,
     ))
 }
