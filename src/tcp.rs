@@ -101,7 +101,7 @@ pub fn start_server<T: 'static + Send + Clone>(
                 let callback1 = callback.clone();
                 let alive1 = alive.clone();
                 let bufstream = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, stream);
-                thread::spawn(move || handle_reader(&net1, bufstream, &callback1, alive1));
+                thread::spawn(move || handle_reader(&net1, bufstream, &callback1, &alive1));
             }
         };
 
@@ -121,7 +121,7 @@ fn handle_reader<T: Clone>(
     net: &Network,
     mut client: BufStream<TcpStream>,
     callback: &ServerCallback<T>,
-    alive: Arc<AtomicBool>,
+    alive: &AtomicBool,
 ) -> Result<(), io::Error> {
     loop {
         let v = read_string_from_socket(&mut client)?;
@@ -186,8 +186,8 @@ fn try_connecting_to_everyone(
 }
 
 fn retry_dead_connections(
-    p: Arc<Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>>,
-    alive: Arc<AtomicBool>,
+    p: &Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>,
+    alive: &AtomicBool,
 ) {
     loop {
         {
@@ -258,7 +258,7 @@ impl Network {
                     start_server(&net1, &rx, &receive_callback.unwrap())
                 }));
             }
-            threads.push(thread::spawn(move || retry_dead_connections(psc1, alive1)));
+            threads.push(thread::spawn(move || retry_dead_connections(&psc1, &alive1)));
         }
 
         net

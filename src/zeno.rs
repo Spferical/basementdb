@@ -566,7 +566,7 @@ fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
     zs.v = nvm.v;
 }
 
-fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: Network) {
+fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.view_changes.insert(msg.i, msg);
@@ -592,7 +592,7 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: Network) {
     }
 }
 
-fn on_newview(z: &ZenoState, msg: NewViewMessage, _net: Network) {
+fn on_newview(z: &ZenoState, msg: &NewViewMessage, _net: &Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if get_primary_for_view(zs, msg.v as usize) != msg.i {
         // the sender was not the right primary for this view
@@ -607,7 +607,7 @@ fn on_newview(z: &ZenoState, msg: NewViewMessage, _net: Network) {
     // with the merge protocol
 }
 
-fn on_fillhole(z: &ZenoState, fhm: FillHoleMessage, net: Network) {
+fn on_fillhole(z: &ZenoState, fhm: &FillHoleMessage, net: &Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     for n in ((fhm.n + 1) as u64)..fhm.or_n {
         if let Some((orm, rm)) = zs.all_executed_reqs.get(n as usize) {
@@ -676,17 +676,17 @@ impl ZenoState {
 
             UnsignedMessage::ViewChange(vcm) => {
                 z_debug!(self, "GOT ViewChange");
-                on_viewchange(self, vcm, n);
+                on_viewchange(self, vcm, &n);
                 None
             }
             UnsignedMessage::NewView(nvm) => {
                 z_debug!(self, "GOT NewView");
-                on_newview(self, nvm, n);
+                on_newview(self, &nvm, &n);
                 None
             }
             UnsignedMessage::FillHole(fhm) => {
                 z_debug!(self, "GOT FillHole");
-                on_fillhole(self, fhm, n);
+                on_fillhole(self, &fhm, &n);
                 None
             }
             _ => None,
@@ -709,6 +709,7 @@ impl ZenoState {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(implicit_hasher))]
 pub fn start_zeno(
     url: &str,
     kp: &signed::KeyPair,
