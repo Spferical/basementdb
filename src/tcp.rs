@@ -9,6 +9,7 @@ use std::str;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -16,7 +17,7 @@ use message::{Message, UnsignedMessage};
 use signed;
 use str_serialize::StrSerialize;
 
-const MAX_BUF_SIZE: usize = 1048576;
+const MAX_BUF_SIZE: usize = 1_048_576;
 const READ_TIMEOUT: u64 = 2;
 const WRITE_TIMEOUT: u64 = 30;
 const CONNECT_TIMEOUT: u64 = 30;
@@ -46,15 +47,15 @@ pub fn read_string_from_socket(sock: &mut BufStream<TcpStream>) -> Result<String
 
     match str::from_utf8(&buf) {
         Err(e) => {
-            return Err(io::Error::new(
+            Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("Read invalid string from socket {:?}!", e),
-            ));
+            ))
         }
         Ok(v) => {
-            return Ok(v.to_string());
+            Ok(v.to_string())
         }
-    };
+    }
 }
 
 pub fn write_string_on_socket<T: Write>(mut sock: T, s: String) -> Result<(), io::Error> {
@@ -78,19 +79,19 @@ fn invoke<T: Clone>(
     message: Message,
     net: Network,
 ) -> Option<Message> {
-    return callback.0(callback.1, message, net);
+    callback.0(callback.1, message, net)
 }
 
-pub fn start_server<'a, T: 'static + Send + Clone>(
-    net: Network,
-    receiver: Receiver<TCPServerCommand>,
-    callback: ServerCallback<T>,
+pub fn start_server<T: 'static + Send + Clone>(
+    net: &Network,
+    receiver: &Receiver<TCPServerCommand>,
+    callback: &ServerCallback<T>,
 ) {
     println!("Server running at {}", net.my_ip_and_port);
     let ip_and_port = net.my_ip_and_port.clone();
     let addr: SocketAddr = ip_and_port.parse().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
-    let alive = Arc::new(Mutex::new(true));
+    let alive = Arc::new(AtomicBool::new(true));
 
     for stream_result in listener.incoming() {
         match stream_result {
@@ -100,7 +101,7 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
                 let callback1 = callback.clone();
                 let alive1 = alive.clone();
                 let bufstream = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, stream);
-                thread::spawn(move || handle_reader(net1, bufstream, callback1, alive1));
+                thread::spawn(move || handle_reader(&net1, bufstream, &callback1, alive1));
             }
         };
 
@@ -108,7 +109,7 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
             Err(_) => continue,
             Ok(cmd) => match cmd {
                 TCPServerCommand::Halt => {
-                    *(alive.lock().unwrap()) = false;
+                    alive.store(false, Ordering::Relaxed);
                     return;
                 }
             },
@@ -117,17 +118,17 @@ pub fn start_server<'a, T: 'static + Send + Clone>(
 }
 
 fn handle_reader<T: Clone>(
-    net: Network,
+    net: &Network,
     mut client: BufStream<TcpStream>,
-    callback: ServerCallback<T>,
-    alive: Arc<Mutex<bool>>,
+    callback: &ServerCallback<T>,
+    alive: Arc<AtomicBool>,
 ) -> Result<(), io::Error> {
     loop {
         let v = read_string_from_socket(&mut client)?;
 
         // Lets check if we're still alive...
         {
-            if !*(alive.lock().unwrap()) {
+            if !alive.load(Ordering::Relaxed) {
                 return Ok(());
             }
         }
@@ -169,10 +170,10 @@ pub fn connect_to_server(ip_and_port: String) -> TCPClient {
             None
         }
     };
-    return TCPClient {
-        ip_and_port: ip_and_port,
-        stream: stream,
-    };
+    TCPClient {
+        ip_and_port,
+        stream,
+    }
 }
 
 fn try_connecting_to_everyone(
@@ -186,11 +187,11 @@ fn try_connecting_to_everyone(
 
 fn retry_dead_connections(
     p: Arc<Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>>,
-    alive: Arc<Mutex<bool>>,
+    alive: Arc<AtomicBool>,
 ) {
     loop {
         {
-            if !(*alive.lock().unwrap()) {
+            if !alive.load(Ordering::Relaxed) {
                 return;
             }
         }
@@ -204,7 +205,7 @@ fn retry_dead_connections(
             retries = conns
                 .into_iter()
                 .filter(|(_, v)| v.lock().unwrap().stream.is_none())
-                .map(|(p, v)| (p.clone(), v.lock().unwrap().ip_and_port.clone()))
+                .map(|(p, v)| (*p, v.lock().unwrap().ip_and_port.clone()))
                 .collect();
         }
 
@@ -221,14 +222,14 @@ fn retry_dead_connections(
 pub struct Network {
     peer_send_clients: Arc<Mutex<HashMap<signed::Public, Arc<Mutex<TCPClient>>>>>,
     server_channel: Sender<TCPServerCommand>,
-    alive_state: Arc<Mutex<bool>>,
+    alive_state: Arc<AtomicBool>,
     my_ip_and_port: String,
     server_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>>,
 }
 
 impl Network {
-    pub fn new<'a, T: 'static + Send + Clone>(
-        my_ip: String,
+    pub fn new<T: 'static + Send + Clone>(
+        my_ip: &str,
         public_key_to_ip_map: HashMap<signed::Public, String>,
         receive_callback: Option<ServerCallback<T>>,
     ) -> Network {
@@ -236,14 +237,14 @@ impl Network {
         let (tx, rx): (Sender<TCPServerCommand>, Receiver<TCPServerCommand>) = mpsc::channel();
         let psc = Arc::new(Mutex::new(peer_send_clients));
         let psc1 = psc.clone();
-        let alive = Arc::new(Mutex::new(true));
+        let alive = Arc::new(AtomicBool::new(true));
         let alive1 = alive.clone();
         let threads = Arc::new(Mutex::new(Vec::new()));
         let net = Network {
             peer_send_clients: psc,
             server_channel: tx,
             alive_state: alive,
-            my_ip_and_port: my_ip.clone(),
+            my_ip_and_port: my_ip.to_string(),
             server_threads: threads,
         };
         let net1 = net.clone();
@@ -254,19 +255,19 @@ impl Network {
             if receive_callback.is_some() {
                 println!("{}: Starting server!", net1.my_ip_and_port.clone());
                 threads.push(thread::spawn(move || {
-                    start_server(net1, rx, receive_callback.unwrap())
+                    start_server(&net1, &rx, &receive_callback.unwrap())
                 }));
             }
             threads.push(thread::spawn(move || retry_dead_connections(psc1, alive1)));
         }
 
-        return net;
+        net
     }
 
-    fn _send(m: Message, client_raw: &mut TCPClient) -> Result<(), io::Error> {
+    fn _send(m: &Message, client_raw: &mut TCPClient) -> Result<(), io::Error> {
         match &mut client_raw.stream {
             Some(stream) => {
-                let s: String = Message::str_serialize(&m)?;
+                let s: String = Message::str_serialize(m)?;
 
                 write_string_on_socket(stream, s)
             }
@@ -281,12 +282,12 @@ impl Network {
         }
     }
 
-    pub fn send_recv(&self, m: Message, recipient: signed::Public) -> Result<Message, io::Error> {
+    pub fn send_recv(&self, m: &Message, recipient: signed::Public) -> Result<Message, io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
             drop(psc);
             let mut client_raw = &mut client_raw_lock.lock().unwrap();
-            let send_result = Network::_send(m, client_raw);
+            let send_result = Network::_send(&m, client_raw);
 
             match send_result {
                 Ok(()) => {}
@@ -309,12 +310,12 @@ impl Network {
         }
     }
 
-    pub fn send(&self, m: Message, recipient: signed::Public) -> Result<(), io::Error> {
+    pub fn send(&self, m: &Message, recipient: signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
         if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
             drop(psc);
             let mut client_raw = &mut client_raw_lock.lock().unwrap();
-            let result = Network::_send(m, client_raw);
+            let result = Network::_send(&m, client_raw);
             match result {
                 Ok(()) => Ok(()),
                 Err(e) => {
@@ -327,19 +328,20 @@ impl Network {
         }
     }
 
-    pub fn send_to_all(&self, m: Message) -> HashMap<signed::Public, Result<(), io::Error>> {
+    pub fn send_to_all(&self, m: &Message) -> HashMap<signed::Public, Result<(), io::Error>> {
         let psc = self.peer_send_clients.lock().unwrap();
         let mut results = HashMap::new();
+        type SendResult = (signed::Public, Result<(), io::Error>);
         let (tx, rx): (
-            Sender<(signed::Public, Result<(), io::Error>)>,
-            Receiver<(signed::Public, Result<(), io::Error>)>,
+            Sender<SendResult>,
+            Receiver<SendResult>,
         ) = mpsc::channel();
 
         // We need to be convinced that our operations on psc's TCPClients
         // will not outlive psc's current binding. scoped_threadpool helps
         // with that.
         for kv in psc.iter() {
-            let (pub_key, tcp_client_lock) = (kv.0.clone(), kv.1.clone());
+            let (pub_key, tcp_client_lock) = (*kv.0, kv.1.clone());
             let m1 = m.clone();
             let tx1 = tx.clone();
             let my_ip_and_port = self.my_ip_and_port.clone();
@@ -350,7 +352,7 @@ impl Network {
             thread::spawn(move || {
                 let tcp_client = &mut tcp_client_lock.lock().unwrap();
                 if my_ip_and_port != tcp_client.ip_and_port {
-                    let result = Network::_send(m1, tcp_client);
+                    let result = Network::_send(&m1, tcp_client);
                     let unwrapped = match result {
                         Ok(()) => Ok(()),
                         Err(e) => {
@@ -371,21 +373,22 @@ impl Network {
         for msg in rx.iter() {
             results.insert(msg.0, msg.1);
         }
-        return results;
+        results
     }
 
     pub fn send_to_all_and_recv(
         &self,
-        m: Message,
+        m: &Message,
     ) -> Receiver<(signed::Public, Result<Message, io::Error>)> {
         let psc = self.peer_send_clients.lock().unwrap();
+        type SendResult = (signed::Public, Result<Message, io::Error>);
         let (tx, rx): (
-            Sender<(signed::Public, Result<Message, io::Error>)>,
-            Receiver<(signed::Public, Result<Message, io::Error>)>,
+            Sender<SendResult>,
+            Receiver<SendResult>,
         ) = mpsc::channel();
 
         for kv in psc.iter() {
-            let (pub_key, tcp_client_lock) = (kv.0.clone(), kv.1.clone());
+            let (pub_key, tcp_client_lock) = (*kv.0, kv.1.clone());
             let m1 = m.clone();
             let tx1 = tx.clone();
             let my_ip_and_port = self.my_ip_and_port.clone();
@@ -393,7 +396,7 @@ impl Network {
             thread::spawn(move || {
                 let mut tcp_client = &mut tcp_client_lock.lock().unwrap();
                 if my_ip_and_port != tcp_client.ip_and_port {
-                    let send_res = Network::_send(m1, &mut tcp_client);
+                    let send_res = Network::_send(&m1, &mut tcp_client);
                     if send_res.is_err() {
                         tcp_client.stream = None;
 
@@ -410,17 +413,17 @@ impl Network {
                 }
             });
         }
-        return rx;
+        rx
     }
 
     pub fn halt(&self) {
-        *self.alive_state.lock().unwrap() = false;
+        self.alive_state.store(false, Ordering::Relaxed);
         self.server_channel.send(TCPServerCommand::Halt).unwrap();
         let mut threads = self.server_threads.lock().unwrap();
         // send dummy message to wake server thread up, in case
         let mut tcpclient = connect_to_server(self.my_ip_and_port.clone());
         let dummy = Message::Unsigned(UnsignedMessage::Dummy);
-        Network::_send(dummy, &mut tcpclient).ok();
+        Network::_send(&dummy, &mut tcpclient).ok();
 
         for thread in threads.drain(..) {
             thread.join().ok();

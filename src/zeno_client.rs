@@ -21,13 +21,13 @@ impl Client {
         pubkeys_to_url: HashMap<signed::Public, String>,
         max_failures: u64,
     ) -> Client {
-        let pubkeys = pubkeys_to_url.keys().map(|p| *p).collect();
+        let pubkeys = pubkeys_to_url.keys().cloned().collect();
         Client {
-            net: Network::new::<i32>("n/a".to_string(), pubkeys_to_url, None),
+            net: Network::new::<i32>("n/a", pubkeys_to_url, None),
             seqno: 0,
-            keypair: keypair,
+            keypair,
             server_pubkeys: pubkeys,
-            max_failures: max_failures,
+            max_failures,
         }
     }
 
@@ -60,22 +60,18 @@ impl Client {
         let m = message::Message::Signed(s);
         loop {
             let mut responses = HashMap::new();
-            for (_target, resp) in self.net.send_to_all_and_recv(m.clone()).iter() {
+            for (_target, resp) in self.net.send_to_all_and_recv(&m).iter() {
                 if let Ok(resp_msg) = resp {
                     // TODO: verify messages match in v, n, h, r, and OR
-                    match self.get_data(resp_msg) {
-                        Some(data) => {
-                            let num = responses.entry(data.clone()).or_insert(0);
-                            *num += 1;
-                            println!("Client got response {:?} {} times", data, num);
-                            if (strong && *num >= self.max_failures * 2 + 1)
-                                || (!strong && *num >= self.max_failures + 1)
-                            {
-                                // we got a weak quorum of replies
-                                return data;
-                            }
+                    if let Some(data) = self.get_data(resp_msg) {
+                        let num = responses.entry(data.clone()).or_insert(0);
+                        *num += 1;
+                        println!("Client got response {:?} {} times", data, num);
+                        if (strong && *num > self.max_failures * 2)
+                            || (!strong && *num > self.max_failures) {
+                            // we got a weak quorum of replies
+                            return data;
                         }
-                        None => {}
                     }
                 }
             }

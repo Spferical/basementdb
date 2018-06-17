@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "cargo-clippy", allow(print_literal))]
+
 use chrono::Utc;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -142,7 +144,7 @@ fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Messa
     Message::Signed(Signed::new(msg, priv_key))
 }
 
-fn broadcast(net: Network, msg: Message) {
+fn broadcast(net: &Network, msg: &Message) {
     let res_map = net.send_to_all(msg);
     for (_key, val) in res_map {
         val.ok();
@@ -154,8 +156,8 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
     let net1 = net.clone();
-    thread::spawn(move || match rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT) {
-        Err(_) => {
+    thread::spawn(move || {
+        if rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT).is_err() {
             let mut zs1 = z1.mut_state.lock().unwrap();
             zs1.ihatetheprimary_accusations.insert(z1.me);
 
@@ -165,11 +167,10 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
             );
             let z2 = z1.clone();
             thread::spawn(move || {
-                broadcast(net1, msg);
+                broadcast(&net1, &msg);
                 z_debug!(z2, "Broadcasted IHATETHEPRIMARY!");
             });
         }
-        _ => {}
     });
 }
 
@@ -187,33 +188,32 @@ fn on_request_message(z: &ZenoState, m: &RequestMessage, net: &Network) -> Optio
             start_ihatetheprimary_timer(z, &mut zs, net);
         }
     }
-    zs.received.insert(d_req.clone());
+    zs.received.insert(d_req);
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
         && zs.pending_ors[0].n == (zs.n + 1) as u64
     {
         let or = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &or, m, net)
+
+    } else if is_primary(z, &zs) {
+        let or_opt = order_message(z, &mut zs, m, net);
+        match or_opt {
+            Some(or) => check_and_execute_request(z, zs, &or, m, net),
+            None => None,
+        }
     } else {
-        if is_primary(z, &zs) {
-            let or_opt = order_message(z, &mut zs, m, net);
-            match or_opt {
-                Some(or) => check_and_execute_request(z, zs, &or, m, net),
-                None => None,
+        let (tx, rx) = mpsc::channel();
+        // note: this may clobber the last client request
+        zs.reqs_without_ors.insert(d_req, tx);
+        drop(zs);
+        match rx.recv() {
+            Ok(or) => {
+                let mut zs = z.mut_state.lock().unwrap();
+                zs.reqs_without_ors.remove(&d_req);
+                check_and_execute_request(z, zs, &or, m, net)
             }
-        } else {
-            let (tx, rx) = mpsc::channel();
-            // note: this may clobber the last client request
-            zs.reqs_without_ors.insert(d_req.clone(), tx);
-            drop(zs);
-            match rx.recv() {
-                Ok(or) => {
-                    let mut zs = z.mut_state.lock().unwrap();
-                    zs.reqs_without_ors.remove(&d_req);
-                    check_and_execute_request(z, zs, &or, m, net)
-                }
-                // our request may have been clobbered
-                Err(_) => None,
-            }
+            // our request may have been clobbered
+            Err(_) => None,
         }
     }
 }
@@ -232,7 +232,7 @@ fn order_message(
     zs.executed_reqs.entry(m.c).or_insert_with(Vec::new);
     assert!(zs.all_executed_reqs.len() == (zs.n + 1) as usize);
 
-    if zs.executed_reqs[&m.c].len() > 0 {
+    if !zs.executed_reqs[&m.c].is_empty() {
         let last_req_option = zs.executed_reqs[&m.c].last();
         let last_req = last_req_option.unwrap();
         last_t = zs.all_executed_reqs[*last_req].1.t as i64;
@@ -253,8 +253,8 @@ fn order_message(
             v: zs.v as u64,
             n: (zs.n + 1) as u64,
             h: h_n,
-            d_req: d_req,
-            i: z.me.clone(),
+            d_req,
+            i: z.me,
             s: m.s,
             nd: Vec::new(),
         };
@@ -263,7 +263,7 @@ fn order_message(
         let od1 = od.clone();
         let private_me1 = z.private_me.clone();
         thread::spawn(move || {
-            let res_map = n1.send_to_all(get_signed_message(
+            let res_map = n1.send_to_all(&get_signed_message(
                 UnsignedMessage::OrderedRequest(od1),
                 &private_me1,
             ));
@@ -361,8 +361,8 @@ fn check_and_execute_request(
     zs.h.push(history_digest);
 
     // if we already have a next request queued, let that thread know
-    if zs.pending_ors.len() > 0 && zs.pending_ors[0].n == (zs.n + 1) as u64 {
-        let d_req = zs.pending_ors[0].d_req.clone();
+    if !zs.pending_ors.is_empty() && zs.pending_ors[0].n == (zs.n + 1) as u64 {
+        let d_req = zs.pending_ors[0].d_req;
         if let Some(tx_next) = zs.reqs_without_ors.remove(&d_req) {
             z_debug!(z, "Sending next request OR for {}", zs.n + 1);
             tx_next.send(zs.pending_ors.remove(0)).unwrap();
@@ -375,12 +375,12 @@ fn check_and_execute_request(
             .unwrap_or(&Vec::new())
             .into_iter()
             .filter(|commit| commit.or == *or)
-            .map(|commit| commit.clone())
+            .cloned()
             .collect::<HashSet<CommitMessage>>();
         zs.pending_commits.remove(&or.d_req);
 
         let (tx_commit, rx_commit) = mpsc::channel();
-        zs.reqs_without_commits.insert(or.d_req.clone(), tx_commit);
+        zs.reqs_without_commits.insert(or.d_req, tx_commit);
         drop(zs);
 
         let n1 = net.clone();
@@ -392,7 +392,7 @@ fn check_and_execute_request(
             &z.private_me,
         );
         thread::spawn(move || {
-            let res_map = n1.send_to_all(commit_msg);
+            let res_map = n1.send_to_all(&commit_msg);
             for (_key, val) in res_map {
                 val.ok();
             }
@@ -453,11 +453,11 @@ fn send_fillhole(_z: &ZenoState, zs: &mut ZenoMutState, n: u64, net: Network) {
     let i = get_primary(zs);
     thread::spawn(move || {
         net.send(
-            Message::Unsigned(UnsignedMessage::FillHole(FillHoleMessage {
-                v: v,
+            &Message::Unsigned(UnsignedMessage::FillHole(FillHoleMessage {
+                v,
                 n: zs_n,
                 or_n: n,
-                i: i,
+                i,
             })),
             i,
         ).ok();
@@ -473,7 +473,7 @@ fn process_or(zs: &mut ZenoMutState, or: OrderedRequestMessage) {
             if or.n == (zs.n + 1) as u64 {
                 tx.send(or).unwrap();
             } else {
-                zs.reqs_without_ors.insert(or.d_req.clone(), tx);
+                zs.reqs_without_ors.insert(or.d_req, tx);
                 queue_or(zs, or);
             }
         }
@@ -495,7 +495,7 @@ fn on_commit(z: &ZenoState, cm: CommitMessage) {
         None => {
             z_debug!(z, "queueing commit");
             zs.pending_commits
-                .entry(cm.or.d_req.clone())
+                .entry(cm.or.d_req)
                 .or_insert_with(Vec::new);
             zs.pending_commits.get_mut(&cm.or.d_req).unwrap().push(cm);
         }
@@ -509,14 +509,14 @@ fn is_view_active(zs: &ZenoMutState) -> bool {
     }
 }
 
-fn on_ihatetheprimary(z: &ZenoState, msg: IHateThePrimaryMessage, net: Network) {
+fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network) {
     let mut zs = z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.ihatetheprimary_accusations.insert(msg.i);
         // switch the view from active to inactive if we've gotten enough
         if is_view_active(&zs) {
             let num_accusations = zs.ihatetheprimary_accusations.len();
-            if num_accusations >= z.max_failures as usize + 1 {
+            if num_accusations > z.max_failures as usize {
                 zs.view_state = ViewState::ViewChanging;
                 zs.v += 1;
                 let o = match zs.last_cc.get(0) {
@@ -533,13 +533,13 @@ fn on_ihatetheprimary(z: &ZenoState, msg: IHateThePrimaryMessage, net: Network) 
                     UnsignedMessage::ViewChange(message::ViewChangeMessage {
                         v: zs.v,
                         cc: zs.last_cc.clone(),
-                        o: o,
+                        o,
                         i: z.me,
                     }),
                     &z.private_me,
                 ));
                 thread::spawn(move || {
-                    broadcast(net, msg);
+                    broadcast(&net, &msg);
                 });
             }
         }
@@ -547,8 +547,8 @@ fn on_ihatetheprimary(z: &ZenoState, msg: IHateThePrimaryMessage, net: Network) 
 }
 
 fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
-    for view_change in nvm.p.iter() {
-        for orm in view_change.o.iter() {
+    for view_change in &nvm.p {
+        for orm in &view_change.o {
             process_or(zs, orm.clone());
         }
         let new_view_cc_n = match view_change.cc.first() {
@@ -572,20 +572,19 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: Network) {
         zs.view_changes.insert(msg.i, msg);
         match zs.view_state {
             ViewState::ViewActive => {
-                if zs.view_changes.len() >= z.max_failures as usize * 2 + 1 {
-                    if is_primary(z, zs) {
-                        let nvm = NewViewMessage {
-                            v: zs.v,
-                            p: zs.view_changes.values().cloned().collect(),
-                            i: z.me,
-                        };
-                        apply_new_view(z, zs, &nvm);
-                        let msg = Message::Signed(Signed::new(
-                            UnsignedMessage::NewView(nvm),
-                            &z.private_me,
-                        ));
-                        broadcast(net, msg);
-                    }
+                if zs.view_changes.len() > z.max_failures as usize * 2
+                        && is_primary(z, zs) {
+                    let nvm = NewViewMessage {
+                        v: zs.v,
+                        p: zs.view_changes.values().cloned().collect(),
+                        i: z.me,
+                    };
+                    apply_new_view(z, zs, &nvm);
+                    let msg = Message::Signed(Signed::new(
+                        UnsignedMessage::NewView(nvm),
+                        &z.private_me,
+                    ));
+                    broadcast(&net, &msg);
                 }
             }
             ViewState::ViewChanging => {}
@@ -611,20 +610,17 @@ fn on_newview(z: &ZenoState, msg: NewViewMessage, _net: Network) {
 fn on_fillhole(z: &ZenoState, fhm: FillHoleMessage, net: Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     for n in ((fhm.n + 1) as u64)..fhm.or_n {
-        match zs.all_executed_reqs.get(n as usize) {
-            Some((orm, rm)) => {
-                let net1 = net.clone();
-                let i = fhm.i;
-                let orm1 = orm.clone();
-                let rm1 = rm.clone();
-                thread::spawn(move || {
-                    net1.send(Message::Unsigned(UnsignedMessage::OrderedRequest(orm1)), i)
-                        .ok();
-                    net1.send(Message::Unsigned(UnsignedMessage::Request(rm1)), i)
-                        .ok();
-                });
-            }
-            None => {}
+        if let Some((orm, rm)) = zs.all_executed_reqs.get(n as usize) {
+            let net1 = net.clone();
+            let i = fhm.i;
+            let orm1 = orm.clone();
+            let rm1 = rm.clone();
+            thread::spawn(move || {
+                net1.send(&Message::Unsigned(UnsignedMessage::OrderedRequest(orm1)), i)
+                    .ok();
+                net1.send(&Message::Unsigned(UnsignedMessage::Request(rm1)), i)
+                    .ok();
+            });
         }
     }
 }
@@ -657,13 +653,10 @@ impl ZenoState {
         match m {
             UnsignedMessage::Request(rm) => {
                 let reply_opt = on_request_message(self, &rm, &n);
-                match reply_opt.clone() {
-                    Some(reply) => {
-                        let mut zs = self.mut_state.lock().unwrap();
-                        zs.replies.insert(rm.c, Some(reply));
-                    }
-                    None => {}
-                };
+                if let Some(reply) = reply_opt.clone() {
+                    let mut zs = self.mut_state.lock().unwrap();
+                    zs.replies.insert(rm.c, Some(reply));
+                }
                 reply_opt
             }
             UnsignedMessage::OrderedRequest(orm) => {
@@ -677,7 +670,7 @@ impl ZenoState {
             }
             UnsignedMessage::IHateThePrimary(ihtpm) => {
                 z_debug!(self, "GOT IHTP");
-                on_ihatetheprimary(self, ihtpm, n);
+                on_ihatetheprimary(self, &ihtpm, n);
                 None
             }
 
@@ -709,8 +702,7 @@ impl ZenoState {
                     None
                 }
                 Some(u) => {
-                    let ret = self.match_unsigned_message(u, n);
-                    ret
+                    self.match_unsigned_message(u, n)
                 }
             },
         }
@@ -718,23 +710,23 @@ impl ZenoState {
 }
 
 pub fn start_zeno(
-    url: String,
-    kp: signed::KeyPair,
+    url: &str,
+    kp: &signed::KeyPair,
     pubkeys: Vec<signed::Public>,
-    pubkeys_to_url: HashMap<signed::Public, String>,
+    pubkeys_to_url: &HashMap<signed::Public, String>,
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
     max_failures: u64,
 ) -> Zeno {
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
     let state = ZenoState {
-        url: url.clone(),
+        url: url.to_string(),
         me: kp.clone().0,
         private_me: kp.clone().1,
-        max_failures: max_failures,
+        max_failures,
         mut_state: Arc::new(Mutex::new(ZenoMutState {
             alive: true,
-            pubkeys: pubkeys,
+            pubkeys,
             n: -1,
             v: 0,
             h: Vec::new(),
@@ -746,7 +738,7 @@ pub fn start_zeno(
             reqs_without_commits: HashMap::new(),
             pending_ors: Vec::new(),
             pending_commits: HashMap::new(),
-            apply_tx: apply_tx,
+            apply_tx,
             last_cc: Vec::new(),
             ihatetheprimary_timer_stopper: None,
             ihatetheprimary_accusations: HashSet::new(),
@@ -756,12 +748,12 @@ pub fn start_zeno(
         })),
     };
     let net = Network::new(
-        url,
+        &url,
         pubkeys_to_url_without_me,
         Some((ZenoState::handle_message, state.clone())),
     );
     Zeno {
-        state: state,
+        state,
         network: net,
     }
 }
@@ -904,7 +896,7 @@ mod tests {
                 urls[i].clone(),
                 keypairs[i].clone(),
                 keypairs.iter().map(|kp| kp.0).collect(),
-                pubkeys_to_urls.clone(),
+                pubkeys_to_urls,
                 tx,
                 max_failures as u64,
             ));

@@ -26,7 +26,7 @@ pub type Private = SecretKey;
 
 /// Use this function to create a public-private keypair
 pub fn gen_keys() -> KeyPair {
-    return gen_keypair();
+    gen_keypair()
 }
 
 impl<T: Serialize> Signed<T> {
@@ -35,10 +35,10 @@ impl<T: Serialize> Signed<T> {
         let m: Vec<u8> = serialize(&base).unwrap();
 
         let sig = sign_detached(&m, private_key);
-        return Signed {
-            base: base,
+        Signed {
+            base,
             signature: sig,
-        };
+        }
     }
 
     /// Verify that an object is signed with a public key `public_key`.
@@ -47,9 +47,9 @@ impl<T: Serialize> Signed<T> {
         let m: Vec<u8> = serialize(&(self.base)).unwrap();
 
         if verify_detached(&(self.signature), &m, public_key) {
-            return Some(self.base);
+            Some(self.base)
         } else {
-            return None;
+            None
         }
     }
 }

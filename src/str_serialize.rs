@@ -13,29 +13,26 @@ where
     /// Converts Object -> bincode's serialize -> String.
     fn str_serialize(self_obj: &T) -> Result<String, io::Error> {
         let binary_encoding_raw = serialize(self_obj);
-        return match binary_encoding_raw {
+        match binary_encoding_raw {
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("str_serialize failed: {:?}", e),
             )),
             Ok(binary_encoding) => Ok(BASE64.encode(&binary_encoding)),
-        };
+        }
     }
 
     /// Converts String -> bincode's deserialize -> Object.
-    fn str_deserialize(s: &String) -> Result<T, io::Error> {
+    fn str_deserialize(s: &str) -> Result<T, io::Error> {
         // Don't understand what's wrong with pattern matching here...
         let dec = BASE64.decode(s.as_bytes());
 
-        match dec {
-            Err(ae) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("BASE64.decode failed: {:?}", ae),
-                ));
-            }
-            Ok(_) => {}
-        };
+	if let Err(ae) = dec {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("BASE64.decode failed: {:?}", ae),
+            ));
+	}
 
         let binary_encoding = dec.unwrap();
 
@@ -44,7 +41,7 @@ where
                 io::ErrorKind::Other,
                 format!("str_deserialize failed: {:?}", e),
             )),
-            Ok(deserialized) => return Ok(deserialized),
+            Ok(deserialized) => Ok(deserialized),
         }
     }
 }
