@@ -478,12 +478,12 @@ mod tests {
         signed_ip_map_2.insert(public1, ip1.clone().to_string());
 
         let network1 = Network::new(
-            ip1.to_string(),
+            &ip1,
             signed_ip_map_1,
             Some((modify_state, test_state1.clone())),
         );
         let network2 = Network::new(
-            ip2.to_string(),
+            &ip2,
             signed_ip_map_2,
             Some((modify_state, test_state2.clone())),
         );
@@ -492,7 +492,7 @@ mod tests {
         let mut b = 0;
 
         while a < 20 {
-            if network1.send_to_all(Message::Unsigned(UnsignedMessage::Test(TestMessage {
+            if network1.send_to_all(&Message::Unsigned(UnsignedMessage::Test(TestMessage {
                 c: public1,
             })))[&public2]
                 .is_ok()
@@ -502,7 +502,7 @@ mod tests {
         }
 
         while b < 20 {
-            if network2.send_to_all(Message::Unsigned(UnsignedMessage::Test(TestMessage {
+            if network2.send_to_all(&Message::Unsigned(UnsignedMessage::Test(TestMessage {
                 c: public2,
             })))[&public1]
                 .is_ok()

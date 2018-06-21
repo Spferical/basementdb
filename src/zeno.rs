@@ -894,10 +894,10 @@ mod tests {
             }
             let (tx, rx) = mpsc::channel();
             zenos.push(start_zeno(
-                urls[i].clone(),
-                keypairs[i].clone(),
+                &urls[i].clone(),
+                &keypairs[i].clone(),
                 keypairs.iter().map(|kp| kp.0).collect(),
-                pubkeys_to_urls,
+                &pubkeys_to_urls,
                 tx,
                 max_failures as u64,
             ));
