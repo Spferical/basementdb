@@ -83,9 +83,11 @@ struct ZenoMutState {
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
     // accusations we've received for current view
     ihatetheprimary_accusations: HashSet<signed::Public>,
+    // view change messages we've received for current view
     view_changes: HashMap<signed::Public, ViewChangeMessage>,
+    // whether the current view is active or changing
     view_state: ViewState,
-
+    // new view messages we've received for next view
     new_views: HashMap<signed::Public, NewViewMessage>,
 }
 
@@ -152,6 +154,7 @@ fn stop_ihatetheprimary_timer(zs: &mut ZenoMutState) {
 }
 
 fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Network) {
+    z_debug!(z, "starting IHTP timer");
     let (tx, rx) = mpsc::channel();
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
@@ -188,27 +191,28 @@ fn on_request_message(
     let d_req = digest::d(m);
     let mut zs = z.mut_state.lock().unwrap();
     if already_handled_msg(&zs, m) {
+        // possibility 1: response is cached
         z_debug!(z, "Sending cached response to client");
         return zs.replies.get(&m.c).unwrap_or(&None).clone();
     } else if zs.reqs_without_ors.contains_key(&d_req) {
-        z_debug!(z, "starting IHTP timer");
+        // this is a client retransmission
         start_ihatetheprimary_timer(z, &mut zs, net);
     }
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].base.d_req == d_req
         && zs.pending_ors[0].base.n == (zs.n + 1) as u64
     {
+        // possibility 2: we have the OR already and can execute it now
         let sor = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &sor, sm, net)
 
     } else if is_primary(z, &zs) {
-        let or_opt = order_message(z, &mut zs, m, net);
-        match or_opt {
-            Some(sor) => check_and_execute_request(z, zs, &sor, sm, net),
-            None => None,
-        }
+        // possibility 3: we are the primary and can order it ourselves
+        order_message(z, &mut zs, m, net)
+            .and_then(|sor| check_and_execute_request(z, zs, &sor, sm, net))
     } else {
+        // possibility 4: we wait until we receive the OR later
         let (tx, rx) = mpsc::channel();
-        // note: this may clobber the last client request
+        // note: this may clobber the client's previous request
         zs.reqs_without_ors.insert(d_req, tx);
         drop(zs);
         match rx.recv() {
@@ -303,8 +307,8 @@ fn generate_client_response(
 /// Runs checks and executes the given request.
 ///
 /// If the request checks out, this method sends it to the
-/// application and returns a channel receiver on which the application
-/// will send its response.
+/// application, waits for a response, and finally returns a message to send
+/// back to the client.
 fn check_and_execute_request(
     z: &ZenoState,
     mut zs: MutexGuard<ZenoMutState>,
