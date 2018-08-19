@@ -137,6 +137,7 @@ pub struct POAMessage {}
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct CheckPointMessage {}
 
+#[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     Request(Signed<RequestMessage>),
