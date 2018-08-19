@@ -58,8 +58,6 @@ struct ZenoMutState {
     n: i64,
     v: u64,
     h: HashChain,
-    // highest timestamp we've received from given client
-    received: HashSet<HashDigest>,
     // all requests we've executed for each client
     // (index in all_executed_reqs)
     executed_reqs: HashMap<signed::Public, Vec<usize>>,
@@ -123,10 +121,6 @@ impl Drop for Zeno {
         self.network.halt();
         self.state.halt();
     }
-}
-
-fn already_received_msg(zs: &ZenoMutState, d_req: &HashDigest) -> bool {
-    zs.received.contains(d_req)
 }
 
 /// returns whether we've already handled the given client request already
@@ -193,16 +187,13 @@ fn on_request_message(
     z_debug!(z, "Got request message");
     let d_req = digest::d(m);
     let mut zs = z.mut_state.lock().unwrap();
-    if already_received_msg(&zs, &d_req) {
-        z_debug!(z, "Already received msg {:?}", m);
-        if already_handled_msg(&zs, m) {
-            return zs.replies.get(&m.c).unwrap_or(&None).clone();
-        } else {
-            z_debug!(z, "starting IHTP timer");
-            start_ihatetheprimary_timer(z, &mut zs, net);
-        }
+    if already_handled_msg(&zs, m) {
+        z_debug!(z, "Sending cached response to client");
+        return zs.replies.get(&m.c).unwrap_or(&None).clone();
+    } else if zs.reqs_without_ors.contains_key(&d_req) {
+        z_debug!(z, "starting IHTP timer");
+        start_ihatetheprimary_timer(z, &mut zs, net);
     }
-    zs.received.insert(d_req);
     if !zs.pending_ors.is_empty() && zs.pending_ors[0].base.d_req == d_req
         && zs.pending_ors[0].base.n == (zs.n + 1) as u64
     {
@@ -730,7 +721,6 @@ pub fn start_zeno(
             n: -1,
             v: 0,
             h: Vec::new(),
-            received: HashSet::new(),
             executed_reqs: HashMap::new(),
             replies: HashMap::new(),
             all_executed_reqs: Vec::new(),
