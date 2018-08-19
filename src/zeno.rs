@@ -77,12 +77,13 @@ struct ZenoMutState {
     pending_ors: Vec<Signed<OrderedRequestMessage>>,
     // COMMITs received for requests we haven't gotten yet
     pending_commits: HashMap<HashDigest, Vec<Signed<CommitMessage>>>,
-
+    // channel to send messages to application
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
-
+    // highest commit certificate we've received
     last_cc: CommitCertificate,
-
+    // if ihatetheprimary timer is active, sending to this stops it
     ihatetheprimary_timer_stopper: Option<Sender<()>>,
+    // accusations we've received for current view
     ihatetheprimary_accusations: HashSet<signed::Public>,
     view_changes: HashMap<signed::Public, ViewChangeMessage>,
     view_state: ViewState,
@@ -274,10 +275,7 @@ fn order_message(
         let n1 = n.clone();
         let sod1 = sod.clone();
         thread::spawn(move || {
-            let res_map = n1.send_to_all(&Message::OrderedRequest(sod1));
-            for (_key, val) in res_map {
-                val.ok();
-            }
+            broadcast(&n1, &Message::OrderedRequest(sod1));
             println!("Sent OR!");
         });
         Some(sod)
@@ -399,10 +397,7 @@ fn check_and_execute_request(
             },
         ));
         thread::spawn(move || {
-            let res_map = n1.send_to_all(&commit_msg);
-            for (_key, val) in res_map {
-                val.ok();
-            }
+            broadcast(&n1, &commit_msg);
             println!("Sent COMMIT!");
         });
 
@@ -450,6 +445,7 @@ fn on_ordered_request(
     process_or(zs, sor);
 }
 
+/// queues the OR message if it's not already in our queue
 fn queue_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
     match zs.pending_ors.binary_search_by_key(&sor.base.n, |o| o.base.n) {
         Ok(_) => {}
@@ -578,6 +574,7 @@ fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
     zs.v = nvm.v;
 }
 
+/// processes a view change message
 fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if msg.v == zs.v {
