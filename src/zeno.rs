@@ -148,16 +148,28 @@ fn broadcast(net: &Network, msg: &Message) {
     }
 }
 
+/// stops any active ihatetheprimary timer
+fn stop_ihatetheprimary_timer(zs: &mut ZenoMutState) {
+    if let Some(ref tx) = zs.ihatetheprimary_timer_stopper.take() {
+        // this may fail if timer ended and thread exited, so no unwrap()
+        tx.send(()).ok();
+    }
+}
+
 fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Network) {
     let (tx, rx) = mpsc::channel();
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
     let net1 = net.clone();
+    let timer_view = zs.v;
     thread::spawn(move || {
         if rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT).is_err() {
             let mut zs1 = z1.mut_state.lock().unwrap();
+            if zs1.v != timer_view {
+                // view changed while timer running
+                return;
+            }
             zs1.ihatetheprimary_accusations.insert(z1.me);
-
             let msg = Message::IHateThePrimary(z1.sign(
                 IHateThePrimaryMessage { v: zs1.v, i: z1.me },
             ));
@@ -434,6 +446,7 @@ fn on_ordered_request(
     if sor.base.n != (zs.n + 1) as u64 {
         send_fillhole(z, zs, sor.base.n, net);
     }
+    stop_ihatetheprimary_timer(zs);
     process_or(zs, sor);
 }
 
@@ -561,6 +574,7 @@ fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
             zs.last_cc = view_change.cc.clone();
         }
     }
+    stop_ihatetheprimary_timer(zs);
     zs.v = nvm.v;
 }
 
