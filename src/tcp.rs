@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use message::{Message, UnsignedMessage};
+use message::Message;
 use signed;
 use str_serialize::StrSerialize;
 
@@ -422,7 +422,7 @@ impl Network {
         let mut threads = self.server_threads.lock().unwrap();
         // send dummy message to wake server thread up, in case
         let mut tcpclient = connect_to_server(self.my_ip_and_port.clone());
-        let dummy = Message::Unsigned(UnsignedMessage::Dummy);
+        let dummy = Message::Dummy;
         Network::_send(&dummy, &mut tcpclient).ok();
 
         for thread in threads.drain(..) {
@@ -434,7 +434,7 @@ impl Network {
 #[cfg(test)]
 mod tests {
     use super::Network;
-    use message::{Message, TestMessage, UnsignedMessage};
+    use message::{Message, TestMessage};
     use signed;
     use std::collections::HashMap;
     use std::net::TcpListener;
@@ -492,9 +492,9 @@ mod tests {
         let mut b = 0;
 
         while a < 20 {
-            if network1.send_to_all(&Message::Unsigned(UnsignedMessage::Test(TestMessage {
+            if network1.send_to_all(&Message::Test(TestMessage {
                 c: public1,
-            })))[&public2]
+            }))[&public2]
                 .is_ok()
             {
                 a += 1;
@@ -502,9 +502,9 @@ mod tests {
         }
 
         while b < 20 {
-            if network2.send_to_all(&Message::Unsigned(UnsignedMessage::Test(TestMessage {
+            if network2.send_to_all(&Message::Test(TestMessage {
                 c: public2,
-            })))[&public1]
+            }))[&public1]
                 .is_ok()
             {
                 b += 1;

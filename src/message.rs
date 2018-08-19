@@ -29,7 +29,7 @@ enum MessageType {
     CheckPoint, // CheckPoint (Request)
 }
 
-pub type CommitCertificate = Vec<CommitMessage>;
+pub type CommitCertificate = Vec<Signed<CommitMessage>>;
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct RequestMessage {
@@ -113,8 +113,7 @@ pub struct IHateThePrimaryMessage {
 pub struct ViewChangeMessage {
     pub v: u64,
     pub cc: CommitCertificate,
-    // TODO: each ORM should be signed
-    pub o: Vec<OrderedRequestMessage>,
+    pub o: Vec<Signed<OrderedRequestMessage>>,
     pub i: signed::Public,
 }
 
@@ -139,35 +138,27 @@ pub struct POAMessage {}
 pub struct CheckPointMessage {}
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
-pub enum UnsignedMessage {
-    Request(RequestMessage),
-    OrderedRequest(OrderedRequestMessage),
-    ClientResponse(Box<ClientResponseMessage>),
-    Commit(CommitMessage),
+pub enum Message {
+    Request(Signed<RequestMessage>),
+    OrderedRequest(Signed<OrderedRequestMessage>),
+    ClientResponse(Signed<Box<ClientResponseMessage>>),
+    Commit(Signed<CommitMessage>),
     FillHole(FillHoleMessage),
 
-    IHateThePrimary(IHateThePrimaryMessage),
-    ViewChange(ViewChangeMessage),
-    NewView(NewViewMessage),
-    ViewConfirm(ViewConfirmMessage),
+    IHateThePrimary(Signed<IHateThePrimaryMessage>),
+    ViewChange(Signed<ViewChangeMessage>),
+    NewView(Signed<NewViewMessage>),
+    ViewConfirm(Signed<ViewConfirmMessage>),
 
-    POM(POMMessage),
-    POD(PODMessage),
-    POA(POAMessage),
+    POM(Signed<POMMessage>),
+    POD(Signed<PODMessage>),
+    POA(Signed<POAMessage>),
 
-    CheckPoint(CheckPointMessage),
+    CheckPoint(Signed<CheckPointMessage>),
 
     Dummy,
     // For debugging purposes
     Test(TestMessage),
-}
-
-impl StrSerialize<Message> for UnsignedMessage {}
-
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
-pub enum Message {
-    Unsigned(UnsignedMessage),
-    Signed(Signed<UnsignedMessage>),
 }
 
 impl StrSerialize<Message> for Message {}

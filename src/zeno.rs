@@ -11,13 +11,15 @@ use std::sync::MutexGuard;
 use std::thread;
 use std::time::Duration;
 
+use serde::Serialize;
+
 use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{
     ClientResponseMessage, CommitCertificate, CommitMessage, ConcreteClientResponseMessage,
     FillHoleMessage, IHateThePrimaryMessage, Message, NewViewMessage, OrderedRequestMessage,
-    RequestMessage, UnsignedMessage, ViewChangeMessage,
+    RequestMessage, ViewChangeMessage,
 };
 use signed;
 use signed::Signed;
@@ -65,16 +67,16 @@ struct ZenoMutState {
     replies: HashMap<signed::Public, Option<Message>>,
 
     // all client requests we've executed, in order
-    all_executed_reqs: Vec<(OrderedRequestMessage, RequestMessage)>,
+    all_executed_reqs: Vec<(Signed<OrderedRequestMessage>, Signed<RequestMessage>)>,
 
     // channels for threads handling requests without ORs
-    reqs_without_ors: HashMap<HashDigest, Sender<OrderedRequestMessage>>,
+    reqs_without_ors: HashMap<HashDigest, Sender<Signed<OrderedRequestMessage>>>,
     // channels for threads handling requests without COMMITs
-    reqs_without_commits: HashMap<HashDigest, Sender<CommitMessage>>,
+    reqs_without_commits: HashMap<HashDigest, Sender<Signed<CommitMessage>>>,
     // ORs received for requests we haven't gotten yet. sorted
-    pending_ors: Vec<OrderedRequestMessage>,
+    pending_ors: Vec<Signed<OrderedRequestMessage>>,
     // COMMITs received for requests we haven't gotten yet
-    pending_commits: HashMap<HashDigest, Vec<CommitMessage>>,
+    pending_commits: HashMap<HashDigest, Vec<Signed<CommitMessage>>>,
 
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
 
@@ -132,16 +134,11 @@ fn already_received_msg(zs: &ZenoMutState, d_req: &HashDigest) -> bool {
 fn already_handled_msg(zs: &ZenoMutState, msg: &RequestMessage) -> bool {
     match zs.executed_reqs.get(&msg.c) {
         Some(reqs) => match reqs.last() {
-            Some(&last_req_n) => zs.all_executed_reqs[last_req_n].1.t >= msg.t,
+            Some(&last_req_n) => zs.all_executed_reqs[last_req_n].1.base.t >= msg.t,
             None => false,
         },
         None => false,
     }
-}
-
-/// returns a signed message representing msg signed with priv_key
-fn get_signed_message(msg: UnsignedMessage, priv_key: &signed::Private) -> Message {
-    Message::Signed(Signed::new(msg, priv_key))
 }
 
 fn broadcast(net: &Network, msg: &Message) {
@@ -161,10 +158,9 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
             let mut zs1 = z1.mut_state.lock().unwrap();
             zs1.ihatetheprimary_accusations.insert(z1.me);
 
-            let msg = get_signed_message(
-                UnsignedMessage::IHateThePrimary(IHateThePrimaryMessage { v: zs1.v, i: z1.me }),
-                &z1.private_me,
-            );
+            let msg = Message::IHateThePrimary(z1.sign(
+                IHateThePrimaryMessage { v: zs1.v, i: z1.me },
+            ));
             let z2 = z1.clone();
             thread::spawn(move || {
                 broadcast(&net1, &msg);
@@ -175,7 +171,12 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
 }
 
 /// given a client request, does lots of stuff
-fn on_request_message(z: &ZenoState, m: &RequestMessage, net: &Network) -> Option<Message> {
+fn on_request_message(
+    z: &ZenoState,
+    sm: &Signed<RequestMessage>,
+    net: &Network
+) -> Option<Message> {
+    let m = &sm.base;
     z_debug!(z, "Got request message");
     let d_req = digest::d(m);
     let mut zs = z.mut_state.lock().unwrap();
@@ -189,16 +190,16 @@ fn on_request_message(z: &ZenoState, m: &RequestMessage, net: &Network) -> Optio
         }
     }
     zs.received.insert(d_req);
-    if !zs.pending_ors.is_empty() && zs.pending_ors[0].d_req == d_req
-        && zs.pending_ors[0].n == (zs.n + 1) as u64
+    if !zs.pending_ors.is_empty() && zs.pending_ors[0].base.d_req == d_req
+        && zs.pending_ors[0].base.n == (zs.n + 1) as u64
     {
-        let or = zs.pending_ors.remove(0);
-        check_and_execute_request(z, zs, &or, m, net)
+        let sor = zs.pending_ors.remove(0);
+        check_and_execute_request(z, zs, &sor, sm, net)
 
     } else if is_primary(z, &zs) {
         let or_opt = order_message(z, &mut zs, m, net);
         match or_opt {
-            Some(or) => check_and_execute_request(z, zs, &or, m, net),
+            Some(sor) => check_and_execute_request(z, zs, &sor, sm, net),
             None => None,
         }
     } else {
@@ -207,10 +208,10 @@ fn on_request_message(z: &ZenoState, m: &RequestMessage, net: &Network) -> Optio
         zs.reqs_without_ors.insert(d_req, tx);
         drop(zs);
         match rx.recv() {
-            Ok(or) => {
+            Ok(sor) => {
                 let mut zs = z.mut_state.lock().unwrap();
                 zs.reqs_without_ors.remove(&d_req);
-                check_and_execute_request(z, zs, &or, m, net)
+                check_and_execute_request(z, zs, &sor, sm, net)
             }
             // our request may have been clobbered
             Err(_) => None,
@@ -226,7 +227,7 @@ fn order_message(
     zs: &mut ZenoMutState,
     m: &RequestMessage,
     n: &Network,
-) -> Option<OrderedRequestMessage> {
+) -> Option<Signed<OrderedRequestMessage>> {
     let last_t: i64;
 
     zs.executed_reqs.entry(m.c).or_insert_with(Vec::new);
@@ -235,7 +236,7 @@ fn order_message(
     if !zs.executed_reqs[&m.c].is_empty() {
         let last_req_option = zs.executed_reqs[&m.c].last();
         let last_req = last_req_option.unwrap();
-        last_t = zs.all_executed_reqs[*last_req].1.t as i64;
+        last_t = zs.all_executed_reqs[*last_req].1.base.t as i64;
     } else {
         last_t = -1;
     }
@@ -249,7 +250,7 @@ fn order_message(
             Some(h_n_minus_1) => digest::d((h_n_minus_1, d_req)),
         };
 
-        let od = OrderedRequestMessage {
+        let sod = z.sign(OrderedRequestMessage {
             v: zs.v as u64,
             n: (zs.n + 1) as u64,
             h: h_n,
@@ -257,22 +258,17 @@ fn order_message(
             i: z.me,
             s: m.s,
             nd: Vec::new(),
-        };
-
+        });
         let n1 = n.clone();
-        let od1 = od.clone();
-        let private_me1 = z.private_me.clone();
+        let sod1 = sod.clone();
         thread::spawn(move || {
-            let res_map = n1.send_to_all(&get_signed_message(
-                UnsignedMessage::OrderedRequest(od1),
-                &private_me1,
-            ));
+            let res_map = n1.send_to_all(&Message::OrderedRequest(sod1));
             for (_key, val) in res_map {
                 val.ok();
             }
             println!("Sent OR!");
         });
-        Some(od)
+        Some(sod)
     }
 }
 
@@ -286,7 +282,7 @@ fn generate_client_response(
     msg: &RequestMessage,
 ) -> Message {
     let crm = ClientResponseMessage {
-        response: ConcreteClientResponseMessage::SpecReply(Signed::new(
+        response: ConcreteClientResponseMessage::SpecReply(z.sign(
             message::SpecReplyMessage {
                 v: om.v,
                 n: om.n,
@@ -295,16 +291,12 @@ fn generate_client_response(
                 c: msg.c,
                 t: msg.t,
             },
-            &z.private_me,
         )),
         j: z.me,
         r: app_response,
         or: om.clone(),
     };
-    Message::Signed(Signed::new(
-        UnsignedMessage::ClientResponse(Box::new(crm)),
-        &z.private_me,
-    ))
+    Message::ClientResponse(z.sign(Box::new(crm)))
 }
 
 /// Runs checks and executes the given request.
@@ -315,10 +307,12 @@ fn generate_client_response(
 fn check_and_execute_request(
     z: &ZenoState,
     mut zs: MutexGuard<ZenoMutState>,
-    or: &OrderedRequestMessage,
-    msg: &RequestMessage,
+    sor: &Signed<OrderedRequestMessage>,
+    smsg: &Signed<RequestMessage>,
     net: &Network,
 ) -> Option<Message> {
+    let or = &sor.base;
+    let msg = &smsg.base;
     z_debug!(z, "Executing request!");
     // check valid view
     if or.v != zs.v as u64 {
@@ -353,7 +347,7 @@ fn check_and_execute_request(
 
     zs.n += 1;
     z_debug!(z, "Executed request {}", zs.n);
-    zs.all_executed_reqs.push((or.clone(), msg.clone()));
+    zs.all_executed_reqs.push((sor.clone(), smsg.clone()));
     zs.executed_reqs.entry(msg.c).or_insert_with(Vec::new);
     let n = zs.n as usize;
     zs.executed_reqs.get_mut(&msg.c).unwrap().push(n);
@@ -361,22 +355,24 @@ fn check_and_execute_request(
     zs.h.push(history_digest);
 
     // if we already have a next request queued, let that thread know
-    if !zs.pending_ors.is_empty() && zs.pending_ors[0].n == (zs.n + 1) as u64 {
-        let d_req = zs.pending_ors[0].d_req;
+    if !zs.pending_ors.is_empty()
+            && zs.pending_ors[0].base.n == (zs.n + 1) as u64 {
+        let d_req = zs.pending_ors[0].base.d_req;
         if let Some(tx_next) = zs.reqs_without_ors.remove(&d_req) {
             z_debug!(z, "Sending next request OR for {}", zs.n + 1);
             tx_next.send(zs.pending_ors.remove(0)).unwrap();
         }
     }
 
+    // strong operation -- only commit once we have a commit certificate
     if msg.s {
         let mut commit_cert = zs.pending_commits
             .get(&or.d_req)
             .unwrap_or(&Vec::new())
             .into_iter()
-            .filter(|commit| commit.or == *or)
+            .filter(|commit| commit.base.or == *or)
             .cloned()
-            .collect::<HashSet<CommitMessage>>();
+            .collect::<HashSet<Signed<CommitMessage>>>();
         zs.pending_commits.remove(&or.d_req);
 
         let (tx_commit, rx_commit) = mpsc::channel();
@@ -384,13 +380,12 @@ fn check_and_execute_request(
         drop(zs);
 
         let n1 = net.clone();
-        let commit_msg = get_signed_message(
-            UnsignedMessage::Commit(CommitMessage {
+        let commit_msg = Message::Commit(z.sign(
+            CommitMessage {
                 or: or.clone(),
                 j: z.me,
-            }),
-            &z.private_me,
-        );
+            },
+        ));
         thread::spawn(move || {
             let res_map = n1.send_to_all(&commit_msg);
             for (_key, val) in res_map {
@@ -401,7 +396,7 @@ fn check_and_execute_request(
 
         while commit_cert.len() < 2 * z.max_failures as usize {
             if let Ok(commit) = rx_commit.recv() {
-                if commit.or == *or {
+                if commit.base.or == *or {
                     commit_cert.insert(commit);
                 }
             } else {
@@ -413,7 +408,7 @@ fn check_and_execute_request(
         let mut zs1 = z.mut_state.lock().unwrap();
         zs1.reqs_without_commits.remove(&or.d_req);
         zs1.last_cc = commit_cert.into_iter().collect();
-        zs1.last_cc.sort_by(|ref a, ref b| a.j.cmp(&(b.j)));
+        zs1.last_cc.sort_by(|ref a, ref b| a.base.j.cmp(&(b.base.j)));
     } else {
         drop(zs);
     }
@@ -422,27 +417,31 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(z: &ZenoState, or: OrderedRequestMessage, net: Network) {
+fn on_ordered_request(
+    z: &ZenoState,
+    sor: Signed<OrderedRequestMessage>,
+    net: Network
+) {
     let zs = &mut *z.mut_state.lock().unwrap();
-    if or.v != zs.v {
-        z_debug!(z, "Ignoring OR from v:{} because v is {}", or.v, zs.v);
+    if sor.base.v != zs.v {
+        z_debug!(z, "Ignoring OR from v:{} because v is {}", sor.base.v, zs.v);
         return;
     }
-    if or.i != get_primary(zs) {
+    if sor.base.i != get_primary(zs) {
         z_debug!(z, "Ignoring OR from wrong primary for this view");
         return;
     }
-    if or.n != (zs.n + 1) as u64 {
-        send_fillhole(z, zs, or.n, net);
+    if sor.base.n != (zs.n + 1) as u64 {
+        send_fillhole(z, zs, sor.base.n, net);
     }
-    process_or(zs, or);
+    process_or(zs, sor);
 }
 
-fn queue_or(zs: &mut ZenoMutState, or: OrderedRequestMessage) {
-    match zs.pending_ors.binary_search_by_key(&or.n, |o| o.n) {
+fn queue_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
+    match zs.pending_ors.binary_search_by_key(&sor.base.n, |o| o.base.n) {
         Ok(_) => {}
         Err(i) => {
-            zs.pending_ors.insert(i, or);
+            zs.pending_ors.insert(i, sor);
         }
     }
 }
@@ -453,51 +452,51 @@ fn send_fillhole(_z: &ZenoState, zs: &mut ZenoMutState, n: u64, net: Network) {
     let i = get_primary(zs);
     thread::spawn(move || {
         net.send(
-            &Message::Unsigned(UnsignedMessage::FillHole(FillHoleMessage {
+            &Message::FillHole(FillHoleMessage {
                 v,
                 n: zs_n,
                 or_n: n,
                 i,
-            })),
+            }),
             i,
         ).ok();
     });
 }
 
-fn process_or(zs: &mut ZenoMutState, or: OrderedRequestMessage) {
-    if or.n as i64 <= zs.n {
+fn process_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
+    if sor.base.n as i64 <= zs.n {
         return;
     }
-    match zs.reqs_without_ors.remove(&or.d_req) {
+    match zs.reqs_without_ors.remove(&sor.base.d_req) {
         Some(tx) => {
-            if or.n == (zs.n + 1) as u64 {
-                tx.send(or).unwrap();
+            if sor.base.n == (zs.n + 1) as u64 {
+                tx.send(sor).unwrap();
             } else {
-                zs.reqs_without_ors.insert(or.d_req, tx);
-                queue_or(zs, or);
+                zs.reqs_without_ors.insert(sor.base.d_req, tx);
+                queue_or(zs, sor);
             }
         }
         None => {
-            if !zs.pending_ors.iter().any(|pending_or| *pending_or == or) {
-                queue_or(zs, or);
+            if !zs.pending_ors.iter().any(|pending_or| *pending_or == sor) {
+                queue_or(zs, sor);
             }
         }
     }
 }
 
-fn on_commit(z: &ZenoState, cm: CommitMessage) {
+fn on_commit(z: &ZenoState, scm: Signed<CommitMessage>) {
     let zs = &mut *z.mut_state.lock().unwrap();
-    match zs.reqs_without_commits.get(&cm.or.d_req) {
+    match zs.reqs_without_commits.get(&scm.base.or.d_req) {
         Some(tx) => {
             z_debug!(z, "Sending commit to existing thread");
-            tx.send(cm).ok();
+            tx.send(scm).ok();
         }
         None => {
             z_debug!(z, "queueing commit");
             zs.pending_commits
-                .entry(cm.or.d_req)
+                .entry(scm.base.or.d_req)
                 .or_insert_with(Vec::new);
-            zs.pending_commits.get_mut(&cm.or.d_req).unwrap().push(cm);
+            zs.pending_commits.get_mut(&scm.base.or.d_req).unwrap().push(scm);
         }
     }
 }
@@ -520,8 +519,8 @@ fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network)
                 zs.view_state = ViewState::ViewChanging;
                 zs.v += 1;
                 let o = match zs.last_cc.get(0) {
-                    Some(cm) => {
-                        let last_committed = cm.or.n as usize;
+                    Some(scm) => {
+                        let last_committed = scm.base.or.n as usize;
                         zs.all_executed_reqs[last_committed + 1..]
                             .iter()
                             .map(|x| x.0.clone())
@@ -529,14 +528,13 @@ fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network)
                     }
                     None => Vec::new(),
                 };
-                let msg = Message::Signed(Signed::new(
-                    UnsignedMessage::ViewChange(message::ViewChangeMessage {
+                let msg = Message::ViewChange(z.sign(
+                    message::ViewChangeMessage {
                         v: zs.v,
                         cc: zs.last_cc.clone(),
                         o,
                         i: z.me,
-                    }),
-                    &z.private_me,
+                    },
                 ));
                 thread::spawn(move || {
                     broadcast(&net, &msg);
@@ -552,11 +550,11 @@ fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
             process_or(zs, orm.clone());
         }
         let new_view_cc_n = match view_change.cc.first() {
-            Some(cm) => cm.or.n as i64,
+            Some(cm) => cm.base.or.n as i64,
             None => -1,
         };
         let our_cc_n = match zs.last_cc.first() {
-            Some(cm) => cm.or.n as i64,
+            Some(cm) => cm.base.or.n as i64,
             None => -1,
         };
         if new_view_cc_n > our_cc_n {
@@ -580,10 +578,7 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
                         i: z.me,
                     };
                     apply_new_view(z, zs, &nvm);
-                    let msg = Message::Signed(Signed::new(
-                        UnsignedMessage::NewView(nvm),
-                        &z.private_me,
-                    ));
+                    let msg = Message::NewView(z.sign(nvm));
                     broadcast(&net, &msg);
                 }
             }
@@ -616,30 +611,34 @@ fn on_fillhole(z: &ZenoState, fhm: &FillHoleMessage, net: &Network) {
             let orm1 = orm.clone();
             let rm1 = rm.clone();
             thread::spawn(move || {
-                net1.send(&Message::Unsigned(UnsignedMessage::OrderedRequest(orm1)), i)
+                net1.send(&Message::OrderedRequest(orm1), i)
                     .ok();
-                net1.send(&Message::Unsigned(UnsignedMessage::Request(rm1)), i)
+                net1.send(&Message::Request(rm1), i)
                     .ok();
             });
         }
     }
 }
 
-pub fn verifier(m: Signed<UnsignedMessage>) -> Option<UnsignedMessage> {
-    match m.clone().base {
-        UnsignedMessage::Request(rm) => m.verify(&rm.c),
-        UnsignedMessage::OrderedRequest(or) => m.verify(&or.i),
-        UnsignedMessage::ClientResponse(crm) => m.verify(&crm.j),
-        UnsignedMessage::Commit(cm) => m.verify(&cm.j),
-        UnsignedMessage::IHateThePrimary(ihtpm) => m.verify(&ihtpm.i),
-        UnsignedMessage::ViewChange(vcm) => m.verify(&vcm.i),
-        UnsignedMessage::NewView(nvm) => m.verify(&nvm.i),
-        UnsignedMessage::FillHole(fhm) => m.verify(&fhm.i),
-        _ => None,
+pub fn verifier(m: &Message) -> bool {
+    match m {
+        Message::Request(srm) => srm.verify(&srm.base.c),
+        Message::OrderedRequest(sorm) => sorm.verify(&sorm.base.i),
+        Message::ClientResponse(scrm) => scrm.verify(&scrm.base.j),
+        Message::Commit(scm) => scm.verify(&scm.base.j),
+        Message::IHateThePrimary(sihtpm) => sihtpm.verify(&sihtpm.base.i),
+        Message::ViewChange(svcm) => svcm.verify(&svcm.base.i),
+        Message::NewView(snvm) => snvm.verify(&snvm.base.i),
+        Message::FillHole(_) => true,
+        _ => false,
     }
 }
 
 impl ZenoState {
+    fn sign<T: Serialize>(&self, thing: T) -> Signed<T> {
+        Signed::new(thing, &self.private_me)
+    }
+
     fn halt(&mut self) {
         // cleanup all active threads/etc, if we can
         if let Ok(mut zs) = self.mut_state.lock() {
@@ -649,62 +648,51 @@ impl ZenoState {
         }
     }
 
-    fn match_unsigned_message(&self, m: UnsignedMessage, n: Network) -> Option<Message> {
+    fn handle_message(self, m: Message, n: Network) -> Option<Message> {
+        if !verifier(&m) {
+            z_debug!(self, "Unable to verify message!");
+            return None
+        }
         match m {
-            UnsignedMessage::Request(rm) => {
-                let reply_opt = on_request_message(self, &rm, &n);
+            Message::Request(srm) => {
+                let reply_opt = on_request_message(&self, &srm, &n);
                 if let Some(reply) = reply_opt.clone() {
                     let mut zs = self.mut_state.lock().unwrap();
-                    zs.replies.insert(rm.c, Some(reply));
+                    zs.replies.insert(srm.base.c, Some(reply));
                 }
                 reply_opt
             }
-            UnsignedMessage::OrderedRequest(orm) => {
-                on_ordered_request(self, orm, n);
+            Message::OrderedRequest(sorm) => {
+                on_ordered_request(&self, sorm, n);
                 None
             }
-            UnsignedMessage::Commit(cm) => {
+            Message::Commit(scm) => {
                 z_debug!(self, "GOT COMMIT!");
-                on_commit(self, cm);
+                on_commit(&self, scm);
                 None
             }
-            UnsignedMessage::IHateThePrimary(ihtpm) => {
+            Message::IHateThePrimary(sihtpm) => {
                 z_debug!(self, "GOT IHTP");
-                on_ihatetheprimary(self, &ihtpm, n);
+                on_ihatetheprimary(&self, &sihtpm.base, n);
                 None
             }
 
-            UnsignedMessage::ViewChange(vcm) => {
+            Message::ViewChange(svcm) => {
                 z_debug!(self, "GOT ViewChange");
-                on_viewchange(self, vcm, &n);
+                on_viewchange(&self, svcm.base, &n);
                 None
             }
-            UnsignedMessage::NewView(nvm) => {
+            Message::NewView(snvm) => {
                 z_debug!(self, "GOT NewView");
-                on_newview(self, &nvm, &n);
+                on_newview(&self, &snvm.base, &n);
                 None
             }
-            UnsignedMessage::FillHole(fhm) => {
+            Message::FillHole(fhm) => {
                 z_debug!(self, "GOT FillHole");
-                on_fillhole(self, &fhm, &n);
+                on_fillhole(&self, &fhm, &n);
                 None
             }
             _ => None,
-        }
-    }
-
-    fn handle_message(self, m: Message, n: Network) -> Option<Message> {
-        match m {
-            Message::Unsigned(um) => self.match_unsigned_message(um, n),
-            Message::Signed(sm) => match verifier(sm) {
-                None => {
-                    z_debug!(self, "Unable to verify message!");
-                    None
-                }
-                Some(u) => {
-                    self.match_unsigned_message(u, n)
-                }
-            },
         }
     }
 }

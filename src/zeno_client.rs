@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use message;
-use message::UnsignedMessage;
+use message::Message;
 use signed;
 use tcp::Network;
 use zeno;
@@ -31,19 +31,16 @@ impl Client {
         }
     }
 
-    fn get_data(&self, m: message::Message) -> Option<Vec<u8>> {
-        match m {
-            message::Message::Signed(sm) => {
-                if let Some(u) = zeno::verifier(sm) {
-                    match u {
-                        UnsignedMessage::ClientResponse(crm) => Some(crm.r),
-                        _ => None,
-                    }
-                } else {
-                    None
+    fn get_data(&self, m: Message) -> Option<Vec<u8>> {
+        if zeno::verifier(&m) {
+            match m {
+                Message::ClientResponse(sm) => {
+                    Some(sm.base.r)
                 }
+                _ => None,
             }
-            _ => None,
+        } else {
+            None
         }
     }
 
@@ -55,9 +52,8 @@ impl Client {
             s: strong,
         };
         self.seqno += 1;
-        let um = UnsignedMessage::Request(rm);
-        let s = signed::Signed::new(um, &self.keypair.1);
-        let m = message::Message::Signed(s);
+        let s = signed::Signed::new(rm, &self.keypair.1);
+        let m = Message::Request(s);
         loop {
             let mut responses = HashMap::new();
             for (_target, resp) in self.net.send_to_all_and_recv(&m).iter() {

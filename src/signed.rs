@@ -42,15 +42,10 @@ impl<T: Serialize> Signed<T> {
     }
 
     /// Verify that an object is signed with a public key `public_key`.
-    /// If so, return the underlying object, otherwise, don't.
-    pub fn verify(self, public_key: &Public) -> Option<T> {
+    pub fn verify(&self, public_key: &Public) -> bool {
         let m: Vec<u8> = serialize(&(self.base)).unwrap();
 
-        if verify_detached(&(self.signature), &m, public_key) {
-            Some(self.base)
-        } else {
-            None
-        }
+        verify_detached(&(self.signature), &m, public_key)
     }
 }
 
@@ -76,8 +71,7 @@ mod tests {
         let signed_obj = Signed::new(obj, &private_key);
         assert_eq!(signed_obj.base, obj);
 
-        let read_obj = signed_obj.verify(&public_key);
-        assert_eq!(read_obj.unwrap(), obj);
+        assert_eq!(signed_obj.verify(&public_key), true)
     }
 
     #[test]
