@@ -52,11 +52,7 @@ impl<T: Serialize> Signed<T> {
 /// Signed objects are string serializable too. This is important
 /// because we need to be able to send signed messages over the
 /// network.
-impl<T> StrSerialize<Signed<T>> for Signed<T>
-where
-    for<'a> T: Serialize + Deserialize<'a>,
-{
-}
+impl<T> StrSerialize<Signed<T>> for Signed<T> where for<'a> T: Serialize + Deserialize<'a> {}
 
 #[cfg(test)]
 mod tests {

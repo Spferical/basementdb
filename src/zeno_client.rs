@@ -34,9 +34,7 @@ impl Client {
     fn get_data(&self, m: Message) -> Option<Vec<u8>> {
         if zeno::verifier(&m) {
             match m {
-                Message::ClientResponse(sm) => {
-                    Some(sm.base.r)
-                }
+                Message::ClientResponse(sm) => Some(sm.base.r),
                 _ => None,
             }
         } else {
@@ -64,7 +62,8 @@ impl Client {
                         *num += 1;
                         println!("Client got response {:?} {} times", data, num);
                         if (strong && *num > self.max_failures * 2)
-                            || (!strong && *num > self.max_failures) {
+                            || (!strong && *num > self.max_failures)
+                        {
                             // we got a weak quorum of replies
                             return data;
                         }

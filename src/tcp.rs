@@ -6,10 +6,10 @@ use std::io::Write;
 use std::marker::Send;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -46,15 +46,11 @@ pub fn read_string_from_socket(sock: &mut BufStream<TcpStream>) -> Result<String
     }
 
     match str::from_utf8(&buf) {
-        Err(e) => {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Read invalid string from socket {:?}!", e),
-            ))
-        }
-        Ok(v) => {
-            Ok(v.to_string())
-        }
+        Err(e) => Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Read invalid string from socket {:?}!", e),
+        )),
+        Ok(v) => Ok(v.to_string()),
     }
 }
 
@@ -258,7 +254,9 @@ impl Network {
                     start_server(&net1, &rx, &receive_callback.unwrap())
                 }));
             }
-            threads.push(thread::spawn(move || retry_dead_connections(&psc1, &alive1)));
+            threads.push(thread::spawn(move || {
+                retry_dead_connections(&psc1, &alive1)
+            }));
         }
 
         net
@@ -332,10 +330,7 @@ impl Network {
         let psc = self.peer_send_clients.lock().unwrap();
         let mut results = HashMap::new();
         type SendResult = (signed::Public, Result<(), io::Error>);
-        let (tx, rx): (
-            Sender<SendResult>,
-            Receiver<SendResult>,
-        ) = mpsc::channel();
+        let (tx, rx): (Sender<SendResult>, Receiver<SendResult>) = mpsc::channel();
 
         // We need to be convinced that our operations on psc's TCPClients
         // will not outlive psc's current binding. scoped_threadpool helps
@@ -382,10 +377,7 @@ impl Network {
     ) -> Receiver<(signed::Public, Result<Message, io::Error>)> {
         let psc = self.peer_send_clients.lock().unwrap();
         type SendResult = (signed::Public, Result<Message, io::Error>);
-        let (tx, rx): (
-            Sender<SendResult>,
-            Receiver<SendResult>,
-        ) = mpsc::channel();
+        let (tx, rx): (Sender<SendResult>, Receiver<SendResult>) = mpsc::channel();
 
         for kv in psc.iter() {
             let (pub_key, tcp_client_lock) = (*kv.0, kv.1.clone());
@@ -492,21 +484,13 @@ mod tests {
         let mut b = 0;
 
         while a < 20 {
-            if network1.send_to_all(&Message::Test(TestMessage {
-                c: public1,
-            }))[&public2]
-                .is_ok()
-            {
+            if network1.send_to_all(&Message::Test(TestMessage { c: public1 }))[&public2].is_ok() {
                 a += 1;
             }
         }
 
         while b < 20 {
-            if network2.send_to_all(&Message::Test(TestMessage {
-                c: public2,
-            }))[&public1]
-                .is_ok()
-            {
+            if network2.send_to_all(&Message::Test(TestMessage { c: public2 }))[&public1].is_ok() {
                 b += 1;
             }
         }

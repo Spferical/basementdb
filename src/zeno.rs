@@ -168,9 +168,8 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
                 return;
             }
             zs1.ihatetheprimary_accusations.insert(z1.me);
-            let msg = Message::IHateThePrimary(z1.sign(
-                IHateThePrimaryMessage { v: zs1.v, i: z1.me },
-            ));
+            let msg =
+                Message::IHateThePrimary(z1.sign(IHateThePrimaryMessage { v: zs1.v, i: z1.me }));
             let z2 = z1.clone();
             thread::spawn(move || {
                 broadcast(&net1, &msg);
@@ -184,7 +183,7 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
 fn on_request_message(
     z: &ZenoState,
     sm: &Signed<RequestMessage>,
-    net: &Network
+    net: &Network,
 ) -> Option<Message> {
     let m = &sm.base;
     z_debug!(z, "Got request message");
@@ -198,13 +197,13 @@ fn on_request_message(
         // this is a client retransmission
         start_ihatetheprimary_timer(z, &mut zs, net);
     }
-    if !zs.pending_ors.is_empty() && zs.pending_ors[0].base.d_req == d_req
+    if !zs.pending_ors.is_empty()
+        && zs.pending_ors[0].base.d_req == d_req
         && zs.pending_ors[0].base.n == (zs.n + 1) as u64
     {
         // possibility 2: we have the OR already and can execute it now
         let sor = zs.pending_ors.remove(0);
         check_and_execute_request(z, zs, &sor, sm, net)
-
     } else if is_primary(z, &zs) {
         // possibility 3: we are the primary and can order it ourselves
         order_message(z, &mut zs, m, net)
@@ -287,16 +286,14 @@ fn generate_client_response(
     msg: &RequestMessage,
 ) -> Message {
     let crm = ClientResponseMessage {
-        response: ConcreteClientResponseMessage::SpecReply(z.sign(
-            message::SpecReplyMessage {
-                v: om.v,
-                n: om.n,
-                h: om.h,
-                d_r: digest::d(app_response.clone()),
-                c: msg.c,
-                t: msg.t,
-            },
-        )),
+        response: ConcreteClientResponseMessage::SpecReply(z.sign(message::SpecReplyMessage {
+            v: om.v,
+            n: om.n,
+            h: om.h,
+            d_r: digest::d(app_response.clone()),
+            c: msg.c,
+            t: msg.t,
+        })),
         j: z.me,
         r: app_response,
         or: om.clone(),
@@ -360,8 +357,7 @@ fn check_and_execute_request(
     zs.h.push(history_digest);
 
     // if we already have a next request queued, let that thread know
-    if !zs.pending_ors.is_empty()
-            && zs.pending_ors[0].base.n == (zs.n + 1) as u64 {
+    if !zs.pending_ors.is_empty() && zs.pending_ors[0].base.n == (zs.n + 1) as u64 {
         let d_req = zs.pending_ors[0].base.d_req;
         if let Some(tx_next) = zs.reqs_without_ors.remove(&d_req) {
             z_debug!(z, "Sending next request OR for {}", zs.n + 1);
@@ -371,7 +367,8 @@ fn check_and_execute_request(
 
     // strong operation -- only commit once we have a commit certificate
     if msg.s {
-        let mut commit_cert = zs.pending_commits
+        let mut commit_cert = zs
+            .pending_commits
             .get(&or.d_req)
             .unwrap_or(&Vec::new())
             .into_iter()
@@ -385,12 +382,10 @@ fn check_and_execute_request(
         drop(zs);
 
         let n1 = net.clone();
-        let commit_msg = Message::Commit(z.sign(
-            CommitMessage {
-                or: or.clone(),
-                j: z.me,
-            },
-        ));
+        let commit_msg = Message::Commit(z.sign(CommitMessage {
+            or: or.clone(),
+            j: z.me,
+        }));
         thread::spawn(move || {
             broadcast(&n1, &commit_msg);
             println!("Sent COMMIT!");
@@ -410,7 +405,8 @@ fn check_and_execute_request(
         let mut zs1 = z.mut_state.lock().unwrap();
         zs1.reqs_without_commits.remove(&or.d_req);
         zs1.last_cc = commit_cert.into_iter().collect();
-        zs1.last_cc.sort_by(|ref a, ref b| a.base.j.cmp(&(b.base.j)));
+        zs1.last_cc
+            .sort_by(|ref a, ref b| a.base.j.cmp(&(b.base.j)));
     } else {
         drop(zs);
     }
@@ -419,11 +415,7 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(
-    z: &ZenoState,
-    sor: Signed<OrderedRequestMessage>,
-    net: Network
-) {
+fn on_ordered_request(z: &ZenoState, sor: Signed<OrderedRequestMessage>, net: Network) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if sor.base.v != zs.v {
         z_debug!(z, "Ignoring OR from v:{} because v is {}", sor.base.v, zs.v);
@@ -442,7 +434,10 @@ fn on_ordered_request(
 
 /// queues the OR message if it's not already in our queue
 fn queue_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
-    match zs.pending_ors.binary_search_by_key(&sor.base.n, |o| o.base.n) {
+    match zs
+        .pending_ors
+        .binary_search_by_key(&sor.base.n, |o| o.base.n)
+    {
         Ok(_) => {}
         Err(i) => {
             zs.pending_ors.insert(i, sor);
@@ -500,7 +495,10 @@ fn on_commit(z: &ZenoState, scm: Signed<CommitMessage>) {
             zs.pending_commits
                 .entry(scm.base.or.d_req)
                 .or_insert_with(Vec::new);
-            zs.pending_commits.get_mut(&scm.base.or.d_req).unwrap().push(scm);
+            zs.pending_commits
+                .get_mut(&scm.base.or.d_req)
+                .unwrap()
+                .push(scm);
         }
     }
 }
@@ -532,14 +530,12 @@ fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network)
                     }
                     None => Vec::new(),
                 };
-                let msg = Message::ViewChange(z.sign(
-                    message::ViewChangeMessage {
-                        v: zs.v,
-                        cc: zs.last_cc.clone(),
-                        o,
-                        i: z.me,
-                    },
-                ));
+                let msg = Message::ViewChange(z.sign(message::ViewChangeMessage {
+                    v: zs.v,
+                    cc: zs.last_cc.clone(),
+                    o,
+                    i: z.me,
+                }));
                 thread::spawn(move || {
                     broadcast(&net, &msg);
                 });
@@ -576,8 +572,7 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
         zs.view_changes.insert(msg.i, msg);
         match zs.view_state {
             ViewState::ViewActive => {
-                if zs.view_changes.len() > z.max_failures as usize * 2
-                        && is_primary(z, zs) {
+                if zs.view_changes.len() > z.max_failures as usize * 2 && is_primary(z, zs) {
                     let nvm = NewViewMessage {
                         v: zs.v,
                         p: zs.view_changes.values().cloned().collect(),
@@ -617,10 +612,8 @@ fn on_fillhole(z: &ZenoState, fhm: &FillHoleMessage, net: &Network) {
             let orm1 = orm.clone();
             let rm1 = rm.clone();
             thread::spawn(move || {
-                net1.send(&Message::OrderedRequest(orm1), i)
-                    .ok();
-                net1.send(&Message::Request(rm1), i)
-                    .ok();
+                net1.send(&Message::OrderedRequest(orm1), i).ok();
+                net1.send(&Message::Request(rm1), i).ok();
             });
         }
     }
@@ -657,7 +650,7 @@ impl ZenoState {
     fn handle_message(self, m: Message, n: Network) -> Option<Message> {
         if !verifier(&m) {
             z_debug!(self, "Unable to verify message!");
-            return None
+            return None;
         }
         match m {
             Message::Request(srm) => {
@@ -1165,7 +1158,8 @@ mod tests {
             .iter()
             .map(|t| duration_to_fsecs(t))
             .map(|secs| (avg - secs).powi(2))
-            .sum::<f64>() / (iters as f64))
+            .sum::<f64>()
+            / (iters as f64))
             .sqrt();
         println!("Avg: {:?}, stdev: {:?}", avg, stdev);
         avg

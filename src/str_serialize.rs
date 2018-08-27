@@ -27,12 +27,12 @@ where
         // Don't understand what's wrong with pattern matching here...
         let dec = BASE64.decode(s.as_bytes());
 
-	if let Err(ae) = dec {
+        if let Err(ae) = dec {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("BASE64.decode failed: {:?}", ae),
             ));
-	}
+        }
 
         let binary_encoding = dec.unwrap();
 

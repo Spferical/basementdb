@@ -9,10 +9,14 @@ pub type HashDigest = [u64; 4];
 pub type HashChain = Vec<HashDigest>;
 
 fn u8to64(p: [u8; 64], i: usize) -> u64 {
-    u64::from(p[i]) | u64::from(p[i + 1]) << 8
-        | u64::from(p[i + 2]) << 16 | u64::from(p[i + 3]) << 24
-        | u64::from(p[i + 4]) << 32 | u64::from(p[i + 5]) << 40
-        | u64::from(p[i + 6]) << 48 | u64::from(p[i + 7]) << 56
+    u64::from(p[i])
+        | u64::from(p[i + 1]) << 8
+        | u64::from(p[i + 2]) << 16
+        | u64::from(p[i + 3]) << 24
+        | u64::from(p[i + 4]) << 32
+        | u64::from(p[i + 5]) << 40
+        | u64::from(p[i + 6]) << 48
+        | u64::from(p[i + 7]) << 56
 }
 
 fn conv(digest: [u8; 64]) -> HashDigest {
