@@ -34,7 +34,7 @@ impl Client {
     fn get_data(&self, m: Message) -> Option<Vec<u8>> {
         if zeno::verifier(&m) {
             match m {
-                Message::ClientResponse(sm) => Some(sm.base.r),
+                Message::ClientResponse(crm) => Some(crm.r),
                 _ => None,
             }
         } else {

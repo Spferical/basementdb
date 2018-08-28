@@ -306,7 +306,7 @@ fn generate_client_response(
         r: app_response,
         or: om.clone(),
     };
-    Message::ClientResponse(z.sign(Box::new(crm)))
+    Message::ClientResponse(Box::new(crm))
 }
 
 /// Runs checks and executes the given request.
@@ -613,7 +613,14 @@ pub fn verifier(m: &Message) -> bool {
     match m {
         Message::Request(srm) => srm.verify(&srm.base.c),
         Message::OrderedRequest(sorm) => sorm.verify(&sorm.base.i),
-        Message::ClientResponse(scrm) => scrm.verify(&scrm.base.j),
+        Message::ClientResponse(crm) => match &crm.response {
+            ConcreteClientResponseMessage::Reply(sr) => {
+                sr.verify(&crm.j) && sr.base.d_r == digest::d(&crm.r)
+            }
+            ConcreteClientResponseMessage::SpecReply(sr) => {
+                sr.verify(&crm.j) && sr.base.d_r == digest::d(&crm.r)
+            }
+        },
         Message::Commit(scm) => scm.verify(&scm.base.j),
         Message::IHateThePrimary(sihtpm) => sihtpm.verify(&sihtpm.base.i),
         Message::ViewChange(svcm) => svcm.verify(&svcm.base.i),
@@ -885,7 +892,7 @@ mod tests {
             apply_resp_tx.send(app_resp.clone()).unwrap();
             let expected_dr = digest::d(app_resp.clone());
             let expected_client_response =
-                Message::ClientResponse(z.sign(Box::new(ClientResponseMessage {
+                Message::ClientResponse(Box::new(ClientResponseMessage {
                     response: ConcreteClientResponseMessage::SpecReply(z.sign(SpecReplyMessage {
                         v: 0,
                         n: 0,
@@ -897,7 +904,7 @@ mod tests {
                     j: zeno_kps[0].0,
                     r: app_resp,
                     or: expected_orm,
-                })));
+                }));
             assert_eq!(t.join().unwrap().unwrap(), expected_client_response);
         }
     }
