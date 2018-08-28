@@ -4,7 +4,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::mpsc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
@@ -46,6 +46,11 @@ pub enum ApplyMsg {
 enum ViewState {
     ViewActive,
     ViewChanging,
+}
+
+enum MessageTarget {
+    All,
+    One(signed::Public),
 }
 
 /// stores the mutable state of our zeno server
@@ -110,6 +115,7 @@ pub struct ZenoState {
     me: signed::Public,
     private_me: signed::Private,
     max_failures: u64,
+    network_channel: Sender<(MessageTarget, Message)>,
     mut_state: Arc<Mutex<ZenoMutState>>,
 }
 
@@ -145,6 +151,21 @@ fn broadcast(net: &Network, msg: &Message) {
     }
 }
 
+/// Sends messages from a channel over the network.
+/// Halts when the channel closes.
+fn send_from_channel(net: &Network, channel: Receiver<(MessageTarget, Message)>) {
+    for (target, msg) in channel {
+        match target {
+            MessageTarget::One(pubkey) => {
+                net.send(&msg, &pubkey).ok();
+            }
+            MessageTarget::All => {
+                broadcast(net, &msg);
+            }
+        };
+    }
+}
+
 /// stops any active ihatetheprimary timer
 fn stop_ihatetheprimary_timer(zs: &mut ZenoMutState) {
     if let Some(ref tx) = zs.ihatetheprimary_timer_stopper.take() {
@@ -153,12 +174,11 @@ fn stop_ihatetheprimary_timer(zs: &mut ZenoMutState) {
     }
 }
 
-fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Network) {
+fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState) {
     z_debug!(z, "starting IHTP timer");
     let (tx, rx) = mpsc::channel();
     zs.ihatetheprimary_timer_stopper = Some(tx);
     let z1 = z.clone();
-    let net1 = net.clone();
     let timer_view = zs.v;
     thread::spawn(move || {
         if rx.recv_timeout(IHATETHEPRIMARY_TIMEOUT).is_err() {
@@ -170,21 +190,14 @@ fn start_ihatetheprimary_timer(z: &ZenoState, zs: &mut ZenoMutState, net: &Netwo
             zs1.ihatetheprimary_accusations.insert(z1.me);
             let msg =
                 Message::IHateThePrimary(z1.sign(IHateThePrimaryMessage { v: zs1.v, i: z1.me }));
-            let z2 = z1.clone();
-            thread::spawn(move || {
-                broadcast(&net1, &msg);
-                z_debug!(z2, "Broadcasted IHATETHEPRIMARY!");
-            });
+            z1.send_to_all(msg);
+            z_debug!(z1, "Broadcasted IHATETHEPRIMARY!");
         }
     });
 }
 
 /// given a client request, does lots of stuff
-fn on_request_message(
-    z: &ZenoState,
-    sm: &Signed<RequestMessage>,
-    net: &Network,
-) -> Option<Message> {
+fn on_request_message(z: &ZenoState, sm: &Signed<RequestMessage>) -> Option<Message> {
     let m = &sm.base;
     z_debug!(z, "Got request message");
     let d_req = digest::d(m);
@@ -195,7 +208,7 @@ fn on_request_message(
         return zs.replies.get(&m.c).unwrap_or(&None).clone();
     } else if zs.reqs_without_ors.contains_key(&d_req) {
         // this is a client retransmission
-        start_ihatetheprimary_timer(z, &mut zs, net);
+        start_ihatetheprimary_timer(z, &mut zs);
     }
     if !zs.pending_ors.is_empty()
         && zs.pending_ors[0].base.d_req == d_req
@@ -203,11 +216,10 @@ fn on_request_message(
     {
         // possibility 2: we have the OR already and can execute it now
         let sor = zs.pending_ors.remove(0);
-        check_and_execute_request(z, zs, &sor, sm, net)
+        check_and_execute_request(z, zs, &sor, sm)
     } else if is_primary(z, &zs) {
         // possibility 3: we are the primary and can order it ourselves
-        order_message(z, &mut zs, m, net)
-            .and_then(|sor| check_and_execute_request(z, zs, &sor, sm, net))
+        order_message(z, &mut zs, m).and_then(|sor| check_and_execute_request(z, zs, &sor, sm))
     } else {
         // possibility 4: we wait until we receive the OR later
         let (tx, rx) = mpsc::channel();
@@ -218,7 +230,7 @@ fn on_request_message(
             Ok(sor) => {
                 let mut zs = z.mut_state.lock().unwrap();
                 zs.reqs_without_ors.remove(&d_req);
-                check_and_execute_request(z, zs, &sor, sm, net)
+                check_and_execute_request(z, zs, &sor, sm)
             }
             // our request may have been clobbered
             Err(_) => None,
@@ -233,7 +245,6 @@ fn order_message(
     z: &ZenoState,
     zs: &mut ZenoMutState,
     m: &RequestMessage,
-    n: &Network,
 ) -> Option<Signed<OrderedRequestMessage>> {
     let last_t: i64;
 
@@ -266,12 +277,7 @@ fn order_message(
             s: m.s,
             nd: Vec::new(),
         });
-        let n1 = n.clone();
-        let sod1 = sod.clone();
-        thread::spawn(move || {
-            broadcast(&n1, &Message::OrderedRequest(sod1));
-            println!("Sent OR!");
-        });
+        z.send_to_all(Message::OrderedRequest(sod.clone()));
         Some(sod)
     }
 }
@@ -311,7 +317,6 @@ fn check_and_execute_request(
     mut zs: MutexGuard<ZenoMutState>,
     sor: &Signed<OrderedRequestMessage>,
     smsg: &Signed<RequestMessage>,
-    net: &Network,
 ) -> Option<Message> {
     let or = &sor.base;
     let msg = &smsg.base;
@@ -381,16 +386,11 @@ fn check_and_execute_request(
         zs.reqs_without_commits.insert(or.d_req, tx_commit);
         drop(zs);
 
-        let n1 = net.clone();
         let commit_msg = Message::Commit(z.sign(CommitMessage {
             or: or.clone(),
             j: z.me,
         }));
-        thread::spawn(move || {
-            broadcast(&n1, &commit_msg);
-            println!("Sent COMMIT!");
-        });
-
+        z.send_to_all(commit_msg);
         while commit_cert.len() < 2 * z.max_failures as usize {
             if let Ok(commit) = rx_commit.recv() {
                 if commit.base.or == *or {
@@ -415,7 +415,7 @@ fn check_and_execute_request(
     Some(generate_client_response(z, app_resp, &or, msg))
 }
 
-fn on_ordered_request(z: &ZenoState, sor: Signed<OrderedRequestMessage>, net: Network) {
+fn on_ordered_request(z: &ZenoState, sor: Signed<OrderedRequestMessage>) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if sor.base.v != zs.v {
         z_debug!(z, "Ignoring OR from v:{} because v is {}", sor.base.v, zs.v);
@@ -426,7 +426,7 @@ fn on_ordered_request(z: &ZenoState, sor: Signed<OrderedRequestMessage>, net: Ne
         return;
     }
     if sor.base.n != (zs.n + 1) as u64 {
-        send_fillhole(z, zs, sor.base.n, net);
+        send_fillhole(z, zs, sor.base.n);
     }
     stop_ihatetheprimary_timer(zs);
     process_or(zs, sor);
@@ -445,21 +445,17 @@ fn queue_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
     }
 }
 
-fn send_fillhole(_z: &ZenoState, zs: &mut ZenoMutState, n: u64, net: Network) {
+fn send_fillhole(z: &ZenoState, zs: &mut ZenoMutState, n: u64) {
     let v = zs.v;
     let zs_n = zs.n;
     let i = get_primary(zs);
-    thread::spawn(move || {
-        net.send(
-            &Message::FillHole(FillHoleMessage {
-                v,
-                n: zs_n,
-                or_n: n,
-                i,
-            }),
-            i,
-        ).ok();
+    let msg = Message::FillHole(FillHoleMessage {
+        v,
+        n: zs_n,
+        or_n: n,
+        i,
     });
+    z.send_to(msg, i)
 }
 
 fn process_or(zs: &mut ZenoMutState, sor: Signed<OrderedRequestMessage>) {
@@ -510,7 +506,7 @@ fn is_view_active(zs: &ZenoMutState) -> bool {
     }
 }
 
-fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network) {
+fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage) {
     let mut zs = z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.ihatetheprimary_accusations.insert(msg.i);
@@ -536,9 +532,7 @@ fn on_ihatetheprimary(z: &ZenoState, msg: &IHateThePrimaryMessage, net: Network)
                     o,
                     i: z.me,
                 }));
-                thread::spawn(move || {
-                    broadcast(&net, &msg);
-                });
+                z.send_to_all(msg);
             }
         }
     }
@@ -566,7 +560,7 @@ fn apply_new_view(_z: &ZenoState, zs: &mut ZenoMutState, nvm: &NewViewMessage) {
 }
 
 /// processes a view change message
-fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
+fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if msg.v == zs.v {
         zs.view_changes.insert(msg.i, msg);
@@ -580,7 +574,7 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
                     };
                     apply_new_view(z, zs, &nvm);
                     let msg = Message::NewView(z.sign(nvm));
-                    broadcast(&net, &msg);
+                    z.send_to_all(msg);
                 }
             }
             ViewState::ViewChanging => {}
@@ -588,7 +582,7 @@ fn on_viewchange(z: &ZenoState, msg: ViewChangeMessage, net: &Network) {
     }
 }
 
-fn on_newview(z: &ZenoState, msg: &NewViewMessage, _net: &Network) {
+fn on_newview(z: &ZenoState, msg: &NewViewMessage) {
     let zs = &mut *z.mut_state.lock().unwrap();
     if get_primary_for_view(zs, msg.v as usize) != msg.i {
         // the sender was not the right primary for this view
@@ -603,18 +597,12 @@ fn on_newview(z: &ZenoState, msg: &NewViewMessage, _net: &Network) {
     // with the merge protocol
 }
 
-fn on_fillhole(z: &ZenoState, fhm: &FillHoleMessage, net: &Network) {
+fn on_fillhole(z: &ZenoState, fhm: &FillHoleMessage) {
     let zs = &mut *z.mut_state.lock().unwrap();
     for n in ((fhm.n + 1) as u64)..fhm.or_n {
         if let Some((orm, rm)) = zs.all_executed_reqs.get(n as usize) {
-            let net1 = net.clone();
-            let i = fhm.i;
-            let orm1 = orm.clone();
-            let rm1 = rm.clone();
-            thread::spawn(move || {
-                net1.send(&Message::OrderedRequest(orm1), i).ok();
-                net1.send(&Message::Request(rm1), i).ok();
-            });
+            z.send_to(Message::OrderedRequest(orm.clone()), fhm.i);
+            z.send_to(Message::Request(rm.clone()), fhm.i);
         }
     }
 }
@@ -647,14 +635,26 @@ impl ZenoState {
         }
     }
 
-    fn handle_message(self, m: Message, n: Network) -> Option<Message> {
+    fn send_to_all(&self, msg: Message) {
+        self.network_channel
+            .send((MessageTarget::All, msg))
+            .unwrap();
+    }
+
+    fn send_to(&self, msg: Message, target: signed::Public) {
+        self.network_channel
+            .send((MessageTarget::One(target), msg))
+            .unwrap();
+    }
+
+    fn handle_message(self, m: Message) -> Option<Message> {
         if !verifier(&m) {
             z_debug!(self, "Unable to verify message!");
             return None;
         }
         match m {
             Message::Request(srm) => {
-                let reply_opt = on_request_message(&self, &srm, &n);
+                let reply_opt = on_request_message(&self, &srm);
                 if let Some(reply) = reply_opt.clone() {
                     let mut zs = self.mut_state.lock().unwrap();
                     zs.replies.insert(srm.base.c, Some(reply));
@@ -662,7 +662,7 @@ impl ZenoState {
                 reply_opt
             }
             Message::OrderedRequest(sorm) => {
-                on_ordered_request(&self, sorm, n);
+                on_ordered_request(&self, sorm);
                 None
             }
             Message::Commit(scm) => {
@@ -672,23 +672,23 @@ impl ZenoState {
             }
             Message::IHateThePrimary(sihtpm) => {
                 z_debug!(self, "GOT IHTP");
-                on_ihatetheprimary(&self, &sihtpm.base, n);
+                on_ihatetheprimary(&self, &sihtpm.base);
                 None
             }
 
             Message::ViewChange(svcm) => {
                 z_debug!(self, "GOT ViewChange");
-                on_viewchange(&self, svcm.base, &n);
+                on_viewchange(&self, svcm.base);
                 None
             }
             Message::NewView(snvm) => {
                 z_debug!(self, "GOT NewView");
-                on_newview(&self, &snvm.base, &n);
+                on_newview(&self, &snvm.base);
                 None
             }
             Message::FillHole(fhm) => {
                 z_debug!(self, "GOT FillHole");
-                on_fillhole(&self, &fhm, &n);
+                on_fillhole(&self, &fhm);
                 None
             }
             _ => None,
@@ -707,11 +707,13 @@ pub fn start_zeno(
 ) -> Zeno {
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
+    let (tx, rx) = mpsc::channel();
     let state = ZenoState {
         url: url.to_string(),
         me: kp.clone().0,
         private_me: kp.clone().1,
         max_failures,
+        network_channel: tx,
         mut_state: Arc::new(Mutex::new(ZenoMutState {
             alive: true,
             pubkeys,
@@ -739,6 +741,8 @@ pub fn start_zeno(
         pubkeys_to_url_without_me,
         Some((ZenoState::handle_message, state.clone())),
     );
+    let net1 = net.clone();
+    thread::spawn(move || send_from_channel(&net1, rx));
     Zeno {
         state,
         network: net,

@@ -68,14 +68,10 @@ pub fn write_string_on_socket<T: Write>(mut sock: T, s: String) -> Result<(), io
     Ok(())
 }
 
-type ServerCallback<T> = (fn(T, Message, Network) -> Option<Message>, T);
+type ServerCallback<T> = (fn(T, Message) -> Option<Message>, T);
 
-fn invoke<T: Clone>(
-    callback: ServerCallback<T>,
-    message: Message,
-    net: Network,
-) -> Option<Message> {
-    callback.0(callback.1, message, net)
+fn invoke<T: Clone>(callback: ServerCallback<T>, message: Message) -> Option<Message> {
+    callback.0(callback.1, message)
 }
 
 pub fn start_server<T: 'static + Send + Clone>(
@@ -93,11 +89,10 @@ pub fn start_server<T: 'static + Send + Clone>(
         match stream_result {
             Err(err) => eprintln!("Err {:?}", err),
             Ok(stream) => {
-                let net1 = net.clone();
                 let callback1 = callback.clone();
                 let alive1 = alive.clone();
                 let bufstream = BufStream::with_capacities(MAX_BUF_SIZE, MAX_BUF_SIZE, stream);
-                thread::spawn(move || handle_reader(&net1, bufstream, &callback1, &alive1));
+                thread::spawn(move || handle_reader(bufstream, &callback1, &alive1));
             }
         };
 
@@ -114,7 +109,6 @@ pub fn start_server<T: 'static + Send + Clone>(
 }
 
 fn handle_reader<T: Clone>(
-    net: &Network,
     mut client: BufStream<TcpStream>,
     callback: &ServerCallback<T>,
     alive: &AtomicBool,
@@ -129,8 +123,7 @@ fn handle_reader<T: Clone>(
             }
         }
 
-        let potential_response =
-            invoke(callback.clone(), Message::str_deserialize(&v)?, net.clone());
+        let potential_response = invoke(callback.clone(), Message::str_deserialize(&v)?);
         match potential_response {
             None => {}
             Some(resp) => write_string_on_socket(&mut client, Message::str_serialize(&resp)?)?,
@@ -308,9 +301,9 @@ impl Network {
         }
     }
 
-    pub fn send(&self, m: &Message, recipient: signed::Public) -> Result<(), io::Error> {
+    pub fn send(&self, m: &Message, recipient: &signed::Public) -> Result<(), io::Error> {
         let mut psc = self.peer_send_clients.lock().unwrap();
-        if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
+        if let Some(client_raw_lock) = psc.get_mut(recipient).cloned() {
             drop(psc);
             let mut client_raw = &mut client_raw_lock.lock().unwrap();
             let result = Network::_send(&m, client_raw);
@@ -436,7 +429,7 @@ mod tests {
         state: usize,
     }
 
-    fn modify_state(state: Arc<Mutex<TestState>>, _: Message, _: Network) -> Option<Message> {
+    fn modify_state(state: Arc<Mutex<TestState>>, _: Message) -> Option<Message> {
         (*state.lock().unwrap()).state += 1;
         None
     }
