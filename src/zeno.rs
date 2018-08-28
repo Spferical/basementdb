@@ -38,6 +38,7 @@ macro_rules! z_debug {
     };
 }
 
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub enum ApplyMsg {
     Apply(Vec<u8>),
 }
@@ -48,6 +49,7 @@ enum ViewState {
     ViewChanging,
 }
 
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 enum MessageTarget {
     All,
     One(signed::Public),
@@ -622,6 +624,44 @@ pub fn verifier(m: &Message) -> bool {
 }
 
 impl ZenoState {
+    fn new(
+        url: String,
+        kp: signed::KeyPair,
+        max_failures: u64,
+        network_channel: Sender<(MessageTarget, Message)>,
+        pubkeys: Vec<signed::Public>,
+        apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
+    ) -> Self {
+        ZenoState {
+            url,
+            me: kp.0,
+            private_me: kp.1,
+            max_failures,
+            network_channel,
+            mut_state: Arc::new(Mutex::new(ZenoMutState {
+                alive: true,
+                pubkeys,
+                n: -1,
+                v: 0,
+                h: Vec::new(),
+                executed_reqs: HashMap::new(),
+                replies: HashMap::new(),
+                all_executed_reqs: Vec::new(),
+                reqs_without_ors: HashMap::new(),
+                reqs_without_commits: HashMap::new(),
+                pending_ors: Vec::new(),
+                pending_commits: HashMap::new(),
+                apply_tx,
+                last_cc: Vec::new(),
+                ihatetheprimary_timer_stopper: None,
+                ihatetheprimary_accusations: HashSet::new(),
+                view_changes: HashMap::new(),
+                view_state: ViewState::ViewActive,
+                new_views: HashMap::new(),
+            })),
+        }
+    }
+
     fn sign<T: Serialize>(&self, thing: T) -> Signed<T> {
         Signed::new(thing, &self.private_me)
     }
@@ -708,34 +748,14 @@ pub fn start_zeno(
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
     let (tx, rx) = mpsc::channel();
-    let state = ZenoState {
-        url: url.to_string(),
-        me: kp.clone().0,
-        private_me: kp.clone().1,
+    let state = ZenoState::new(
+        url.to_string(),
+        kp.clone(),
         max_failures,
-        network_channel: tx,
-        mut_state: Arc::new(Mutex::new(ZenoMutState {
-            alive: true,
-            pubkeys,
-            n: -1,
-            v: 0,
-            h: Vec::new(),
-            executed_reqs: HashMap::new(),
-            replies: HashMap::new(),
-            all_executed_reqs: Vec::new(),
-            reqs_without_ors: HashMap::new(),
-            reqs_without_commits: HashMap::new(),
-            pending_ors: Vec::new(),
-            pending_commits: HashMap::new(),
-            apply_tx,
-            last_cc: Vec::new(),
-            ihatetheprimary_timer_stopper: None,
-            ihatetheprimary_accusations: HashSet::new(),
-            view_changes: HashMap::new(),
-            view_state: ViewState::ViewActive,
-            new_views: HashMap::new(),
-        })),
-    };
+        tx,
+        pubkeys,
+        apply_tx,
+    );
     let net = Network::new(
         &url,
         pubkeys_to_url_without_me,
@@ -802,6 +822,83 @@ mod tests {
                     vec![self.x]
                 }
             }
+        }
+    }
+
+    /// unit tests
+    mod unit {
+        use super::*;
+        use digest;
+        use message::{
+            ClientResponseMessage, ConcreteClientResponseMessage, Message, OrderedRequestMessage,
+            RequestMessage, SpecReplyMessage,
+        };
+        use signed::Signed;
+        use zeno::{ApplyMsg, MessageTarget};
+
+        #[test]
+        fn test_primary_spec_reply() {
+            let (net_tx, net_rx) = mpsc::channel();
+            let (apply_tx, apply_rx) = mpsc::channel();
+            let client_keypair = signed::gen_keys();
+            let mut zeno_kps = Vec::new();
+            for _ in 1..4 {
+                zeno_kps.push(signed::gen_keys());
+            }
+            let z = ZenoState::new(
+                "fakeurl".to_string(),
+                zeno_kps[0].clone(),
+                1,
+                net_tx,
+                vec![zeno_kps[0].0],
+                apply_tx,
+            );
+            assert_eq!(z.mut_state.lock().unwrap().v, 0);
+            let rm_base = RequestMessage {
+                o: vec![1, 2, 3],
+                t: 0,
+                c: client_keypair.0,
+                s: false,
+            };
+            let req_msg = Message::Request(Signed::new(rm_base.clone(), &client_keypair.1));
+            let h = digest::d(rm_base);
+            let z1 = z.clone();
+            let t = thread::spawn(move || z1.handle_message(req_msg));
+
+            // primary should order this request
+            let expected_orm = OrderedRequestMessage {
+                v: 0,
+                n: 0,
+                h: h.clone(),
+                d_req: h.clone(),
+                i: zeno_kps[0].0,
+                s: false,
+                nd: vec![],
+            };
+            let expected_or = Message::OrderedRequest(z.sign(expected_orm.clone()));
+            assert_eq!(net_rx.recv().unwrap(), (MessageTarget::All, expected_or));
+            // and primary should forward req to application
+            let (apply_msg, apply_resp_tx) = apply_rx.recv().unwrap();
+            assert_eq!(apply_msg, ApplyMsg::Apply(vec![1, 2, 3]));
+            // when application responds, primary should give client response
+            let app_resp = vec![4, 5, 6];
+            apply_resp_tx.send(app_resp.clone()).unwrap();
+            let expected_dr = digest::d(app_resp.clone());
+            let expected_client_response =
+                Message::ClientResponse(z.sign(Box::new(ClientResponseMessage {
+                    response: ConcreteClientResponseMessage::SpecReply(z.sign(SpecReplyMessage {
+                        v: 0,
+                        n: 0,
+                        h: h.clone(),
+                        d_r: expected_dr,
+                        c: client_keypair.0,
+                        t: 0,
+                    })),
+                    j: zeno_kps[0].0,
+                    r: app_resp,
+                    or: expected_orm,
+                })));
+            assert_eq!(t.join().unwrap().unwrap(), expected_client_response);
         }
     }
 
