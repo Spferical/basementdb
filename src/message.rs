@@ -52,26 +52,10 @@ pub struct OrderedRequestMessage {
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct ClientResponseMessage {
-    pub response: ConcreteClientResponseMessage, // The first chunk of the response
-    pub j: signed::Public,                       // Replica public key
-    pub r: Vec<u8>,                              // Result of the operation performed
-    pub or: OrderedRequestMessage,               // OrderedRequestMessage
-}
-
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
-pub enum ConcreteClientResponseMessage {
-    SpecReply(signed::Signed<SpecReplyMessage>),
-    Reply(signed::Signed<ReplyMessage>),
-}
-
-#[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
-pub struct SpecReplyMessage {
-    pub v: u64,            // Current view number
-    pub n: u64,            // Highest sequence number executed
-    pub h: HashDigest,     // History, a hash-chain digest of the requests
-    pub d_r: HashDigest,   // Digest of the result `r`
-    pub c: signed::Public, // Client public key
-    pub t: u64,            // Timestamp assigned by the client to each request
+    pub response: Signed<ReplyMessage>, // The first chunk of the response
+    pub j: signed::Public,              // Replica public key
+    pub r: Vec<u8>,                     // Result of the operation performed
+    pub or: OrderedRequestMessage,      // OrderedRequestMessage
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
@@ -88,6 +72,7 @@ pub struct ReplyMessage {
     pub d_r: HashDigest,   // Digest of the result `r`
     pub c: signed::Public, // Client public key
     pub t: u64,            // Timestamp assigned by the client to each request
+    pub s: bool,           // Whether this is a strong reply
 }
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]

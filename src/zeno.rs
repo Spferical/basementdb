@@ -17,9 +17,9 @@ use digest;
 use digest::{HashChain, HashDigest};
 use message;
 use message::{
-    ClientResponseMessage, CommitCertificate, CommitMessage, ConcreteClientResponseMessage,
-    FillHoleMessage, IHateThePrimaryMessage, Message, NewViewMessage, OrderedRequestMessage,
-    RequestMessage, ViewChangeMessage,
+    ClientResponseMessage, CommitCertificate, CommitMessage, FillHoleMessage,
+    IHateThePrimaryMessage, Message, NewViewMessage, OrderedRequestMessage, RequestMessage,
+    ViewChangeMessage,
 };
 use signed;
 use signed::Signed;
@@ -294,14 +294,15 @@ fn generate_client_response(
     msg: &RequestMessage,
 ) -> Message {
     let crm = ClientResponseMessage {
-        response: ConcreteClientResponseMessage::SpecReply(z.sign(message::SpecReplyMessage {
+        response: z.sign(message::ReplyMessage {
             v: om.v,
             n: om.n,
             h: om.h,
             d_r: digest::d(app_response.clone()),
             c: msg.c,
             t: msg.t,
-        })),
+            s: om.s,
+        }),
         j: z.me,
         r: app_response,
         or: om.clone(),
@@ -613,14 +614,9 @@ pub fn verifier(m: &Message) -> bool {
     match m {
         Message::Request(srm) => srm.verify(&srm.base.c),
         Message::OrderedRequest(sorm) => sorm.verify(&sorm.base.i),
-        Message::ClientResponse(crm) => match &crm.response {
-            ConcreteClientResponseMessage::Reply(sr) => {
-                sr.verify(&crm.j) && sr.base.d_r == digest::d(&crm.r)
-            }
-            ConcreteClientResponseMessage::SpecReply(sr) => {
-                sr.verify(&crm.j) && sr.base.d_r == digest::d(&crm.r)
-            }
-        },
+        Message::ClientResponse(crm) => {
+            crm.response.verify(&crm.j) && crm.response.base.d_r == digest::d(&crm.r)
+        }
         Message::Commit(scm) => scm.verify(&scm.base.j),
         Message::IHateThePrimary(sihtpm) => sihtpm.verify(&sihtpm.base.i),
         Message::ViewChange(svcm) => svcm.verify(&svcm.base.i),
