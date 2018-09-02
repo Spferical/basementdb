@@ -1,5 +1,3 @@
-#![feature(plugin, use_extern_macros)]
-
 extern crate bincode;
 extern crate bufstream;
 extern crate data_encoding;
