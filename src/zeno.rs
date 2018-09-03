@@ -57,6 +57,7 @@ enum MessageTarget {
 
 /// stores the mutable state of our zeno server
 #[allow(dead_code)]
+#[derive(Clone)]
 struct ZenoMutState {
     alive: bool,
     pubkeys: Vec<signed::Public>,
@@ -840,16 +841,23 @@ mod tests {
             ClientResponseMessage, CommitMessage, Message, OrderedRequestMessage, ReplyMessage,
             RequestMessage,
         };
-        use signed::Signed;
+        use signed::{KeyPair, Signed};
+        use std::sync::mpsc::{Receiver, Sender};
         use zeno::{ApplyMsg, MessageTarget};
 
-        #[test]
-        fn test_primary_spec_reply() {
+        struct ZenoFixture {
+            zeno: ZenoState,
+            zeno_kps: Vec<KeyPair>,
+            net_rx: Receiver<(MessageTarget, Message)>,
+            apply_rx: Receiver<(ApplyMsg, Sender<Vec<u8>>)>,
+        }
+
+        /// gives us a zeno instance that thinks it's in a cluster of 4
+        fn setup() -> ZenoFixture {
             let (net_tx, net_rx) = mpsc::channel();
             let (apply_tx, apply_rx) = mpsc::channel();
-            let client_keypair = signed::gen_keys();
             let zeno_kps = gen_key_vec(4);
-            let z = ZenoState::new(
+            let zeno = ZenoState::new(
                 "fakeurl".to_string(),
                 zeno_kps[0].clone(),
                 1,
@@ -857,6 +865,18 @@ mod tests {
                 vec![zeno_kps[0].0],
                 apply_tx,
             );
+            ZenoFixture {
+                zeno,
+                zeno_kps,
+                net_rx,
+                apply_rx,
+            }
+        }
+
+        #[test]
+        fn test_primary_spec_reply() {
+            let zf = setup();
+            let client_keypair = signed::gen_keys();
             let rm_base = RequestMessage {
                 o: vec![1, 2, 3],
                 t: 0,
@@ -865,7 +885,7 @@ mod tests {
             };
             let req_msg = Message::Request(Signed::new(rm_base.clone(), &client_keypair.1));
             let h = digest::d(rm_base);
-            let z1 = z.clone();
+            let z1 = zf.zeno.clone();
             let t = thread::spawn(move || z1.handle_message(req_msg));
 
             // primary should broadcast OR
@@ -874,14 +894,14 @@ mod tests {
                 n: 0,
                 h: h.clone(),
                 d_req: h.clone(),
-                i: zeno_kps[0].0,
+                i: zf.zeno_kps[0].0,
                 s: false,
                 nd: vec![],
             };
-            let expected_or = Message::OrderedRequest(z.sign(expected_orm.clone()));
-            assert_eq!(net_rx.recv().unwrap(), (MessageTarget::All, expected_or));
+            let expected_or = Message::OrderedRequest(zf.zeno.sign(expected_orm.clone()));
+            assert_eq!(zf.net_rx.recv().unwrap(), (MessageTarget::All, expected_or));
             // and primary should forward req to application
-            let (apply_msg, apply_resp_tx) = apply_rx.recv().unwrap();
+            let (apply_msg, apply_resp_tx) = zf.apply_rx.recv().unwrap();
             assert_eq!(apply_msg, ApplyMsg::Apply(vec![1, 2, 3]));
             // when application responds, primary should give client response
             let app_resp = vec![4, 5, 6];
@@ -889,7 +909,7 @@ mod tests {
             let expected_dr = digest::d(app_resp.clone());
             let expected_client_response =
                 Message::ClientResponse(Box::new(ClientResponseMessage {
-                    response: z.sign(ReplyMessage {
+                    response: zf.zeno.sign(ReplyMessage {
                         v: 0,
                         n: 0,
                         h: h.clone(),
@@ -898,7 +918,7 @@ mod tests {
                         t: 0,
                         s: false,
                     }),
-                    j: zeno_kps[0].0,
+                    j: zf.zeno_kps[0].0,
                     r: app_resp,
                     or: expected_orm,
                 }));
@@ -907,18 +927,8 @@ mod tests {
 
         #[test]
         fn test_primary_strong_reply() {
-            let (net_tx, net_rx) = mpsc::channel();
-            let (apply_tx, apply_rx) = mpsc::channel();
+            let zf = setup();
             let client_keypair = signed::gen_keys();
-            let zeno_kps = gen_key_vec(4);
-            let z = ZenoState::new(
-                "fakeurl".to_string(),
-                zeno_kps[0].clone(),
-                1,
-                net_tx,
-                vec![zeno_kps[0].0],
-                apply_tx,
-            );
             let rm_base = RequestMessage {
                 o: vec![1, 2, 3],
                 t: 0,
@@ -927,7 +937,7 @@ mod tests {
             };
             let req_msg = Message::Request(Signed::new(rm_base.clone(), &client_keypair.1));
             let h = digest::d(rm_base);
-            let z1 = z.clone();
+            let z1 = zf.zeno.clone();
             let t = thread::spawn(move || z1.handle_message(req_msg));
 
             // primary should broadcast OR
@@ -936,48 +946,48 @@ mod tests {
                 n: 0,
                 h: h.clone(),
                 d_req: h.clone(),
-                i: zeno_kps[0].0,
+                i: zf.zeno_kps[0].0,
                 s: true,
                 nd: vec![],
             };
-            let expected_or = Message::OrderedRequest(z.sign(expected_orm.clone()));
-            assert_eq!(net_rx.recv().unwrap(), (MessageTarget::All, expected_or));
+            let expected_or = Message::OrderedRequest(zf.zeno.sign(expected_orm.clone()));
+            assert_eq!(zf.net_rx.recv().unwrap(), (MessageTarget::All, expected_or));
 
             // next, primary should commit and wait for other commits
-            let expected_commit = Message::Commit(z.sign(CommitMessage {
+            let expected_commit = Message::Commit(zf.zeno.sign(CommitMessage {
                 or: expected_orm.clone(),
-                j: z.me,
+                j: zf.zeno.me,
             }));
             assert_eq!(
-                net_rx.recv().unwrap(),
+                zf.net_rx.recv().unwrap(),
                 (MessageTarget::All, expected_commit)
             );
 
             // primary should have sent req to application
-            let (apply_msg, apply_resp_tx) = apply_rx.recv().unwrap();
+            let (apply_msg, apply_resp_tx) = zf.apply_rx.recv().unwrap();
             assert_eq!(apply_msg, ApplyMsg::Apply(vec![1, 2, 3]));
 
             assert_eq!(
                 None,
-                z.clone().handle_message(Message::Commit(Signed::new(
+                zf.zeno.clone().handle_message(Message::Commit(Signed::new(
                     CommitMessage {
                         or: expected_orm.clone(),
-                        j: zeno_kps[1].0
+                        j: zf.zeno_kps[1].0
                     },
-                    &zeno_kps[1].1
+                    &zf.zeno_kps[1].1
                 )))
             );
             // after 1 commit, primary should not have committed yet
-            assert!(apply_rx.try_recv().is_err());
+            assert!(zf.apply_rx.try_recv().is_err());
 
             assert_eq!(
                 None,
-                z.clone().handle_message(Message::Commit(Signed::new(
+                zf.zeno.clone().handle_message(Message::Commit(Signed::new(
                     CommitMessage {
                         or: expected_orm.clone(),
-                        j: zeno_kps[2].0
+                        j: zf.zeno_kps[2].0
                     },
-                    &zeno_kps[2].1
+                    &zf.zeno_kps[2].1
                 )))
             );
 
@@ -987,7 +997,7 @@ mod tests {
             let expected_dr = digest::d(app_resp.clone());
             let expected_client_response =
                 Message::ClientResponse(Box::new(ClientResponseMessage {
-                    response: z.sign(ReplyMessage {
+                    response: zf.zeno.sign(ReplyMessage {
                         v: 0,
                         n: 0,
                         h: h.clone(),
@@ -996,11 +1006,33 @@ mod tests {
                         t: 0,
                         s: true,
                     }),
-                    j: zeno_kps[0].0,
+                    j: zf.zeno_kps[0].0,
                     r: app_resp,
                     or: expected_orm,
                 }));
             assert_eq!(t.join().unwrap().unwrap(), expected_client_response);
+        }
+
+        #[test]
+        fn test_primary_reply_bad_timestamp() {
+            let zf = setup();
+            let client_kp = signed::gen_keys();
+            let rm_base = RequestMessage {
+                o: vec![1, 2, 3],
+                t: 1,
+                c: client_kp.0,
+                s: false,
+            };
+            let req_msg = Message::Request(Signed::new(rm_base.clone(), &client_kp.1));
+            let old_mut_state = (*zf.zeno.mut_state.lock().unwrap()).clone();
+            // messages with invalid timestamps should be completely ignored
+            assert_eq!(zf.zeno.clone().handle_message(req_msg), None);
+            let mut_state = &*zf.zeno.mut_state.lock().unwrap();
+            assert_eq!(mut_state.v, old_mut_state.v);
+            assert_eq!(mut_state.n, old_mut_state.n);
+            assert_eq!(mut_state.h, old_mut_state.h);
+            assert!(zf.apply_rx.try_recv().is_err());
+            assert!(zf.net_rx.try_recv().is_err());
         }
     }
 
