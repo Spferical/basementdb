@@ -1034,6 +1034,28 @@ mod tests {
             assert!(zf.apply_rx.try_recv().is_err());
             assert!(zf.net_rx.try_recv().is_err());
         }
+
+        #[test]
+        fn test_primary_reply_bad_signature() {
+            let zf = setup();
+            let client_kp = signed::gen_keys();
+            let rm_base = RequestMessage {
+                o: vec![1, 2, 3],
+                t: 1,
+                c: client_kp.0,
+                s: false,
+            };
+            // sign with wrong key
+            let req_msg = Message::Request(Signed::new(rm_base.clone(), &signed::gen_keys().1));
+            let old_mut_state = (*zf.zeno.mut_state.lock().unwrap()).clone();
+            assert_eq!(zf.zeno.clone().handle_message(req_msg), None);
+            let mut_state = &*zf.zeno.mut_state.lock().unwrap();
+            assert_eq!(mut_state.v, old_mut_state.v);
+            assert_eq!(mut_state.n, old_mut_state.n);
+            assert_eq!(mut_state.h, old_mut_state.h);
+            assert!(zf.apply_rx.try_recv().is_err());
+            assert!(zf.net_rx.try_recv().is_err());
+        }
     }
 
     #[test]
