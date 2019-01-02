@@ -1,0 +1,8 @@
+{
+    "nodes": [
+        "localhost:10001",
+        "localhost:10002",
+        "localhost:10003"
+    ],
+    "f": 1
+}
