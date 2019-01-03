@@ -1,8 +1,21 @@
 {
     "nodes": [
-        "localhost:10001",
-        "localhost:10002",
-        "localhost:10003"
+        {
+            "url": "localhost:10001",
+            "pubkey": "/cBqZdydoqd/GTvLilTuTZL6xt3Uwwa0M/9xoa03pBk="
+        },
+        {
+            "url": "localhost:10002",
+            "pubkey": "rcEFOC5yZU2JYAVpmpxszvPgutS3gUl/mhOskWbIFoo="
+        },
+        {
+            "url": "localhost:10003",
+            "pubkey": "1+OG/MVo0fas8/jlHd6/dB8BDifEBnFxMnI/inBJvf4="
+        },
+        {
+            "url": "localhost:10004",
+            "pubkey": "++fjGIg5z9uVbNj4twY5JJ016E78PrqX2VtWjehvN9o="
+        }
     ],
     "f": 1
 }
