@@ -1,41 +1,26 @@
 extern crate basementdb;
+extern crate sodiumoxide;
 
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate clap;
 
-use clap::{App, Arg, SubCommand};
 use basementdb::signed::Public;
+use clap::{App, AppSettings, Arg, SubCommand};
+use sodiumoxide::crypto::sign::SecretKey as Private;
 
+extern crate base64;
 extern crate serde;
 extern crate serde_json;
-extern crate base64;
 
-use serde::{Deserialize, Deserializer, Serializer};
+use std::fs;
 use std::fs::File;
 
-fn as_base64<T, S>(buf: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where T: AsRef<[u8]>,
-          S: Serializer
-{
-    serializer.serialize_str(&base64::encode(buf.as_ref()))
-}
-
-fn from_base64<'d, D>(deserializer: D) -> Result<Public, D::Error>
-    where D: Deserializer<'d>
-{
-    use serde::de::Error;
-    String::deserialize(deserializer)
-        .and_then(|string| base64::decode(&string).map_err(|err| Error::custom(err.to_string())))
-        .map(|bytes| Public::from_slice(&bytes))
-        .and_then(|opt| opt.ok_or_else(|| Error::custom("failed to deserialize public key")))
-}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ClusterConfigNode {
     url: String,
-    #[serde(serialize_with = "as_base64", deserialize_with = "from_base64")]
-    pubkey: Public,
+    pubkey_path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,7 +36,6 @@ pub fn load_cluster_config(path: &str) -> ClusterConfig {
 }
 
 pub fn sample_config() -> ClusterConfig {
-    let keys: Vec<_> = (0..4).map(|_| basementdb::signed::gen_keys()).collect();
     let urls: Vec<_> = (10001..=10004)
         .map(|p| format!("localhost:{}", p))
         .collect();
@@ -59,7 +43,7 @@ pub fn sample_config() -> ClusterConfig {
         nodes: (0..4)
             .map(|i| ClusterConfigNode {
                 url: urls[i].clone(),
-                pubkey: keys[i].0,
+                pubkey_path: "./".to_owned() + &urls[i] + ".pub",
             })
             .collect(),
         f: 1,
@@ -92,12 +76,22 @@ fn main() {
 
     if matches.is_present("gen_keys") {
         let (pubkey, privkey) = basementdb::signed::gen_keys();
-        println!("pub:{}\npriv:{}", base64::encode(&pubkey[..]),
-                base64::encode(&privkey[..]));
+        println!(
+            "pub:{}\npriv:{}",
+            base64::encode(&pubkey[..]),
+            base64::encode(&privkey[..])
+        );
         return;
     } else if matches.is_present("gen_config") {
         let config = sample_config();
         println!("{}", serde_json::to_string(&config).unwrap());
+        let keys = (0..4).map(|_| basementdb::signed::gen_keys());
+        let node_urls = config.nodes.iter().map(|node| &node.url);
+        for (key, url) in keys.zip(node_urls) {
+            fs::write(format!("{}.pub", url), base64::encode(&key.0)).unwrap();
+            let Private(ref skbytes) = key.1;
+            fs::write(format!("{}.priv", url), base64::encode(&skbytes.to_vec())).unwrap();
+        }
     } else if matches.is_present("run") {
         let cluster_config_path = matches.value_of("cluster config file").unwrap();
         let cluster_config = load_cluster_config(cluster_config_path);
