@@ -4,7 +4,7 @@ use std::io;
 use std::io::BufRead;
 use std::io::Write;
 use std::marker::Send;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::str;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -81,7 +81,7 @@ pub fn start_server<T: 'static + Send + Clone>(
 ) {
     println!("Server running at {}", net.my_ip_and_port);
     let ip_and_port = net.my_ip_and_port.clone();
-    let addr: SocketAddr = ip_and_port.parse().unwrap();
+    let addr: SocketAddr = ip_and_port.to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(addr).unwrap();
     let alive = Arc::new(AtomicBool::new(true));
 
@@ -138,7 +138,7 @@ pub struct TCPClient {
 }
 
 pub fn connect_to_server(ip_and_port: String) -> TCPClient {
-    let sock_addr: SocketAddr = ip_and_port.parse().unwrap();
+    let sock_addr: SocketAddr = ip_and_port.to_socket_addrs().unwrap().next().unwrap();
     let s = TcpStream::connect_timeout(&sock_addr, Duration::new(CONNECT_TIMEOUT, 0));
     let stream = match s {
         Ok(tcp_stream) => {
