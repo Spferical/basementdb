@@ -139,7 +139,7 @@ fn main() {
                 let (tx, rx) = mpsc::channel();
                 let pubkey = pubkeys[0];
                 // let's go
-                zeno::start_zeno(
+                let z = zeno::start_zeno(
                     url,
                     &(pubkey, private_key),
                     pubkeys,
@@ -147,6 +147,9 @@ fn main() {
                     tx,
                     cluster_config.f,
                 );
+                loop {
+                    dbg!(rx.recv().unwrap());
+                }
             }
             Err(msg) => {
                 println!("{}", msg);
