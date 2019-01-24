@@ -68,6 +68,7 @@ pub fn sample_config() -> ClusterConfig {
 
 fn main() {
     let matches = App::new("BasementDB")
+        .setting(AppSettings::ArgRequiredElseHelp)
         .version("0.1")
         .author(crate_authors!())
         .subcommand(SubCommand::with_name("gen_keys").about("Generates a public/private key pair"))
