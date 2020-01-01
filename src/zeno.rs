@@ -749,6 +749,7 @@ pub fn start_zeno(
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
     max_failures: u64,
 ) -> Zeno {
+    assert!(max_failures * 3 + 1 <= pubkeys_to_url.len() as u64);
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
     let (tx, rx) = mpsc::channel();
