@@ -13,17 +13,17 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use digest;
-use digest::{HashChain, HashDigest};
-use message;
-use message::{
+use crate::digest;
+use crate::digest::{HashChain, HashDigest};
+use crate::message;
+use crate::message::{
     ClientResponseMessage, CommitCertificate, CommitMessage, FillHoleMessage,
     IHateThePrimaryMessage, Message, NewViewMessage, OrderedRequestMessage, RequestMessage,
     ViewChangeMessage,
 };
-use signed;
-use signed::Signed;
-use tcp::Network;
+use crate::signed;
+use crate::signed::Signed;
+use crate::tcp::Network;
 
 const IHATETHEPRIMARY_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -318,7 +318,7 @@ fn generate_client_response(
 /// back to the client.
 fn check_and_execute_request(
     z: &ZenoState,
-    mut zs: MutexGuard<ZenoMutState>,
+    mut zs: MutexGuard<'_, ZenoMutState>,
     sor: &Signed<OrderedRequestMessage>,
     smsg: &Signed<RequestMessage>,
 ) -> Option<Message> {
@@ -778,21 +778,21 @@ pub fn start_zeno(
 mod tests {
     use super::start_zeno;
     use super::ApplyMsg;
-    use signed;
+    use crate::signed;
+    use crate::zeno::Zeno;
+    use crate::zeno::ZenoState;
+    use crate::zeno_client;
     use std::collections::HashMap;
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::sync::mpsc::Receiver;
     use std::thread;
     use std::time;
-    use zeno::Zeno;
-    use zeno::ZenoState;
-    use zeno_client;
 
     use rand::thread_rng;
     use rand::Rng;
 
-    use digest::HashDigest;
+    use crate::digest::HashDigest;
 
     trait TestApp {
         fn new() -> Self;
@@ -837,14 +837,14 @@ mod tests {
     /// unit tests
     mod unit {
         use super::*;
-        use digest;
-        use message::{
+        use crate::digest;
+        use crate::message::{
             ClientResponseMessage, CommitMessage, Message, OrderedRequestMessage, ReplyMessage,
             RequestMessage,
         };
-        use signed::{KeyPair, Signed};
+        use crate::signed::{KeyPair, Signed};
+        use crate::zeno::{ApplyMsg, MessageTarget};
         use std::sync::mpsc::{Receiver, Sender};
-        use zeno::{ApplyMsg, MessageTarget};
 
         struct ZenoFixture {
             zeno: ZenoState,

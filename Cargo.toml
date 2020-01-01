@@ -2,6 +2,7 @@
 name = "basementdb"
 version = "0.1.0"
 authors = ["Matthew Pfeiffer <spferical@gmail.com>", "Srinivas Kaza <kaza@mit.edu>"]
+edition = "2018"
 
 [dependencies]
 bincode = "1.0.0"

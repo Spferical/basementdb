@@ -1,5 +1,4 @@
-extern crate basementdb;
-extern crate sodiumoxide;
+use basementdb;
 
 #[macro_use]
 extern crate serde_derive;
@@ -11,9 +10,9 @@ use basementdb::zeno;
 use clap::{App, AppSettings, Arg, SubCommand};
 use sodiumoxide::crypto::sign::SecretKey as Private;
 
-extern crate base64;
-extern crate serde;
-extern crate serde_json;
+use base64;
+
+use serde_json;
 
 use std::collections::HashMap;
 use std::fs;
@@ -139,7 +138,7 @@ fn main() {
                 let (tx, rx) = mpsc::channel();
                 let pubkey = pubkeys[0];
                 // let's go
-                let z = zeno::start_zeno(
+                let _z = zeno::start_zeno(
                     url,
                     &(pubkey, private_key),
                     pubkeys,

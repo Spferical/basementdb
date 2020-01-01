@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use message;
-use message::Message;
-use signed;
-use tcp::Network;
-use zeno;
+use crate::message;
+use crate::message::Message;
+use crate::signed;
+use crate::tcp::Network;
+use crate::zeno;
 
 #[allow(dead_code)]
 pub struct Client {

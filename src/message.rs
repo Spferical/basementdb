@@ -1,9 +1,9 @@
-use digest::HashDigest;
-use signed;
+use crate::digest::HashDigest;
+use crate::signed;
 use std::vec::Vec;
 
-use signed::Signed;
-use str_serialize::StrSerialize;
+use crate::signed::Signed;
+use crate::str_serialize::StrSerialize;
 
 #[allow(dead_code)]
 enum MessageType {

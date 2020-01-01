@@ -13,9 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use message::Message;
-use signed;
-use str_serialize::StrSerialize;
+use crate::message::Message;
+use crate::signed;
+use crate::str_serialize::StrSerialize;
 
 const MAX_BUF_SIZE: usize = 1_048_576;
 const READ_TIMEOUT: u64 = 2;
@@ -277,7 +277,7 @@ impl Network {
         let mut psc = self.peer_send_clients.lock().unwrap();
         if let Some(client_raw_lock) = psc.get_mut(&recipient).cloned() {
             drop(psc);
-            let mut client_raw = &mut client_raw_lock.lock().unwrap();
+            let client_raw = &mut client_raw_lock.lock().unwrap();
             let send_result = Network::_send(&m, client_raw);
 
             match send_result {
@@ -305,7 +305,7 @@ impl Network {
         let mut psc = self.peer_send_clients.lock().unwrap();
         if let Some(client_raw_lock) = psc.get_mut(recipient).cloned() {
             drop(psc);
-            let mut client_raw = &mut client_raw_lock.lock().unwrap();
+            let client_raw = &mut client_raw_lock.lock().unwrap();
             let result = Network::_send(&m, client_raw);
             match result {
                 Ok(()) => Ok(()),
@@ -419,8 +419,8 @@ impl Network {
 #[cfg(test)]
 mod tests {
     use super::Network;
-    use message::{Message, TestMessage};
-    use signed;
+    use crate::message::{Message, TestMessage};
+    use crate::signed;
     use std::collections::HashMap;
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
