@@ -169,7 +169,7 @@ fn try_connecting_to_everyone(
     h: HashMap<signed::Public, String>,
 ) -> HashMap<signed::Public, Arc<Mutex<TCPClient>>> {
     h.into_iter()
-        .map(|(p, o)| (p, connect_to_server(o.to_string())))
+        .map(|(p, o)| (p, connect_to_server(o)))
         .map(|(p, o)| (p, Arc::new(Mutex::new(o))))
         .collect()
 }
@@ -192,7 +192,7 @@ fn retry_dead_connections(
         {
             let conns = &*p.lock().unwrap();
             retries = conns
-                .into_iter()
+                .iter()
                 .filter(|(_, v)| v.lock().unwrap().stream.is_none())
                 .map(|(p, v)| (*p, v.lock().unwrap().ip_and_port.clone()))
                 .collect();
@@ -241,10 +241,10 @@ impl Network {
         {
             let mut threads = net.server_threads.lock().unwrap();
 
-            if receive_callback.is_some() {
+            if let Some(rx_callback) = receive_callback {
                 println!("{}: Starting server!", net1.my_ip_and_port.clone());
                 threads.push(thread::spawn(move || {
-                    start_server(&net1, &rx, &receive_callback.unwrap())
+                    start_server(&net1, &rx, &rx_callback)
                 }));
             }
             threads.push(thread::spawn(move || {
@@ -382,10 +382,10 @@ impl Network {
                 let mut tcp_client = &mut tcp_client_lock.lock().unwrap();
                 if my_ip_and_port != tcp_client.ip_and_port {
                     let send_res = Network::_send(&m1, &mut tcp_client);
-                    if send_res.is_err() {
+                    if let Err(err) = send_res {
                         tcp_client.stream = None;
 
-                        tx1.send((pub_key, Err(send_res.unwrap_err()))).ok();
+                        tx1.send((pub_key, Err(err))).ok();
                     } else {
                         let recv_result = Network::_recv(&mut tcp_client);
 

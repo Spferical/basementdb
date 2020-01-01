@@ -110,7 +110,6 @@ fn main() {
             base64::encode(&pubkey[..]),
             base64::encode(&privkey[..])
         );
-        return;
     } else if matches.is_present("gen_config") {
         let config = ClusterConfig::sample();
         println!("{}", serde_json::to_string(&config).unwrap());

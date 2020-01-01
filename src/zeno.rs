@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "cargo-clippy", allow(print_literal))]
+#![allow(clippy::print_literal)]
 
 use chrono::Utc;
 use std::collections::HashMap;
@@ -380,7 +380,7 @@ fn check_and_execute_request(
             .pending_commits
             .get(&or.d_req)
             .unwrap_or(&Vec::new())
-            .into_iter()
+            .iter()
             .filter(|commit| commit.base.or == *or)
             .cloned()
             .collect::<HashSet<Signed<CommitMessage>>>();
@@ -740,7 +740,7 @@ impl ZenoState {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(implicit_hasher))]
+#[allow(clippy::implicit_hasher)]
 pub fn start_zeno(
     url: &str,
     kp: &signed::KeyPair,
@@ -749,7 +749,7 @@ pub fn start_zeno(
     apply_tx: Sender<(ApplyMsg, Sender<Vec<u8>>)>,
     max_failures: u64,
 ) -> Zeno {
-    assert!(max_failures * 3 + 1 <= pubkeys_to_url.len() as u64);
+    assert!(max_failures * 3 < pubkeys_to_url.len() as u64);
     let mut pubkeys_to_url_without_me = pubkeys_to_url.clone();
     pubkeys_to_url_without_me.remove(&kp.0);
     let (tx, rx) = mpsc::channel();
