@@ -159,10 +159,7 @@ pub fn connect_to_server(ip_and_port: String) -> TCPClient {
                 tcp_stream,
             ))
         }
-        Err(e) => {
-            eprintln!("Failed to connect to {}: {:?}", ip_and_port, e);
-            None
-        }
+        Err(_e) => None,
     };
     TCPClient {
         ip_and_port,
