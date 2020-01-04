@@ -30,17 +30,22 @@ pub enum TCPServerCommand {
 pub fn read_string_from_socket(sock: &mut BufStream<TcpStream>) -> Result<String, io::Error> {
     let mut buf: Vec<u8> = Vec::new();
 
-    match sock.read_until(0, &mut buf) {
-        Err(err) => {
-            println!("Unable to read from TCP stream: {:?}", err);
-        }
-        Ok(num_bytes) => {
-            if num_bytes == 0 {
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Read timed out"));
-            } else {
-                // remove the null byte
-                let l = buf.len();
-                buf.remove(l - 1);
+    loop {
+        match sock.read_until(0, &mut buf) {
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
+            Err(err) => {
+                println!("Unable to read from TCP stream: {:?}", err);
+                return Err(err);
+            }
+            Ok(num_bytes) => {
+                if num_bytes == 0 {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Read timed out"));
+                } else {
+                    // remove the null byte
+                    let l = buf.len();
+                    buf.remove(l - 1);
+                    break;
+                }
             }
         }
     }
